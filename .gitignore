@@ -1,1 +1,5 @@
 node_modules/
+
+# Local copies of Standard Notes' own repositories and docs (see standardnotes-source/README.md).
+# They stay on this computer and are never pushed with the plugins.
+standardnotes-source/

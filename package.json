@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "http-server . -p 8001 --cors -c-1",
-    "test": "node --test",
+    "test": "node --test \"*/test/*.test.js\"",
     "vendor": "node -e \"require('fs').copyFileSync('node_modules/@standardnotes/component-relay/dist/dist.js', 'shared/vendor/component-relay.js')\""
   },
   "devDependencies": {
