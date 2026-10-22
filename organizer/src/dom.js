@@ -24,7 +24,7 @@ export function captureFocus(root) {
 }
 
 export function restoreFocus(root, focus) {
-  const field = focus && root.querySelector(`[data-focus="${focus.key}"]`)
+  const field = focus && root.querySelector(`[data-focus="${CSS.escape(focus.key)}"]`)
   if (!field || field === document.activeElement) return
   field.focus({ preventScroll: true })
   if (focus.start != null) field.setSelectionRange(focus.start, focus.end)

@@ -18,9 +18,18 @@ import {
   routineFor,
   sections,
   serializeTodos,
+  addGroup,
+  deleteGroup,
+  moveByOne,
+  moveGroup,
+  moveToEdge,
+  moveToGroup,
+  placeTodo,
+  renameGroup,
   setDue,
   setRating,
   setRepeat,
+  sortTodos,
   undoToday,
 } from '../src/todos.js'
 
@@ -42,7 +51,7 @@ const texts = (items) => items.map((item) => item.text)
 
 test('reads the documented format', () => {
   const model = parseTodos(DOCUMENTED, { reviewed: '2026-10-20' })
-  const plain = { repeat: null, streak: 0, priority: null, value: null }
+  const plain = { repeat: null, streak: 0, priority: null, value: null, group: null }
   assert.deepEqual(strip(model.items), [
     { text: 'Renew passport', tags: ['admin'], status: 'active', touched: '2026-10-01', due: '2026-11-15', done: null, ...plain },
     { text: 'Call the plumber', tags: ['home'], status: 'active', touched: '2026-10-22', due: null, done: null, ...plain },
@@ -80,13 +89,28 @@ test('brackets and hashes that are part of the text stay in the text', () => {
   assert.deepEqual(model.items[2].tags, [])
 })
 
-test('text that is not a todo is kept, including sections it does not know', () => {
-  const body = ['Remember: bins go out on Tuesday', '- [ ] a (2026-10-22)', '', '## Shopping list', '- milk', '- eggs'].join(
-    '\n',
-  )
+test('text that is not a todo is kept; a heading becomes a group', () => {
+  const body = [
+    'Remember: bins go out on Tuesday',
+    '- [ ] a (2026-10-22)',
+    '',
+    '## Shopping list',
+    '- milk',
+    'Ask Sam what else',
+    '- eggs',
+  ].join('\n')
   const model = parseTodos(body)
-  assert.deepEqual(texts(model.items), ['a'])
-  assert.equal(model.other, 'Remember: bins go out on Tuesday\n\n## Shopping list\n- milk\n- eggs')
+  assert.deepEqual(model.groups, ['Shopping list'])
+  assert.deepEqual(
+    model.items.map((item) => [item.text, item.group]),
+    [
+      ['a', null],
+      ['milk', 'Shopping list'],
+      ['eggs', 'Shopping list'],
+    ],
+  )
+  assert.equal(model.other, 'Remember: bins go out on Tuesday\n\nAsk Sam what else')
+  normalizeTodos(model, { today: TODAY })
   const once = serializeTodos(model, TODAY).body
   assert.equal(serializeTodos(parseTodos(once), TODAY).body, once, 'stable when re-read')
 })
@@ -110,7 +134,7 @@ test('parks todos untouched for the stale period, but never ones with a due date
   assert.equal(model.items[1].status, 'parked', 'a shorter setting parks sooner')
 })
 
-test('orders overdue, then by due date, then newest; parked and done newest first', () => {
+test('Sort orders overdue, then by due date, then newest; parked and done are always newest first', () => {
   const model = parseTodos(
     [
       '- [ ] no due, older (2026-10-01)',
@@ -127,6 +151,8 @@ test('orders overdue, then by due date, then newest; parked and done newest firs
       '- [x] done newer (2026-10-01, done 2026-10-12)',
     ].join('\n'),
   )
+  assert.equal(sections(model, TODAY).active[0].text, 'no due, older', 'your order until you sort')
+  sortTodos(model, TODAY)
   const { active, parked, done } = sections(model, TODAY)
   assert.deepEqual(texts(active), [
     'very overdue',
@@ -163,6 +189,7 @@ test('adds one todo per pasted line, with tags and the chosen due date', () => {
     streak: 0,
     priority: null,
     value: null,
+    group: null,
   }
   assert.deepEqual(strip(added), [
     { text: 'Book flights', tags: ['travel'], ...fresh },
@@ -323,7 +350,7 @@ test('priority and value are kept in the text', () => {
   assert.deepEqual([unknown.text, unknown.priority], ['Fix the boiler (priority urgent)', null])
 })
 
-test('ratings order the list: overdue, high priority, due, the rest, low priority; high value first', () => {
+test('Sort uses ratings: overdue, high priority, due, the rest, low priority; high value first', () => {
   const model = parseTodos(
     [
       '- [ ] low priority, due soon (2026-10-20, due 2026-10-23, priority low)',
@@ -338,6 +365,7 @@ test('ratings order the list: overdue, high priority, due, the rest, low priorit
       '- [ ] plain, low value (2026-10-22, value low)',
     ].join('\n'),
   )
+  sortTodos(model, TODAY)
   assert.deepEqual(texts(sections(model, TODAY).active), [
     'overdue',
     'overdue, low value',
@@ -361,6 +389,130 @@ test('rating a todo counts as touching it; making it repeat clears the ratings',
   assert.equal(item.value, null)
   setRepeat(item, EVERY_DAY, TODAY)
   assert.deepEqual([item.priority, item.value], [null, null])
+})
+
+const GROUPED = [
+  '- [ ] Work out (2026-10-01, every day)',
+  '- [ ] Reply to Sam (2026-10-21)',
+  '',
+  '## Home',
+  '- [ ] Call the plumber (2026-10-22, priority high)',
+  '- [ ] Fix the tap (2026-10-20)',
+  '',
+  '## Trip to Paris',
+  '- [ ] Book flights (2026-10-22, due 2026-11-01)',
+  '',
+  '## Parked',
+  '- [ ] Clear out the garage (2026-09-01, group Home)',
+  '',
+  '## Done',
+  '- [x] Buy milk (2026-10-20, done 2026-10-21, group Home)',
+].join('\n')
+
+test('groups: headings in your order, and parked or done todos remember theirs', () => {
+  const model = parseTodos(GROUPED)
+  assert.deepEqual(model.groups, ['Home', 'Trip to Paris'])
+  const { routine, ungrouped, groups, parked, done } = sections(model, TODAY)
+  assert.deepEqual(texts(routine), ['Work out'])
+  assert.deepEqual(texts(ungrouped), ['Reply to Sam'])
+  assert.deepEqual(
+    groups.map((group) => [group.name, texts(group.items)]),
+    [
+      ['Home', ['Call the plumber', 'Fix the tap']],
+      ['Trip to Paris', ['Book flights']],
+    ],
+  )
+  assert.deepEqual([parked[0].group, done[0].group], ['Home', 'Home'])
+  assert.equal(serializeTodos(model, TODAY).body, GROUPED)
+})
+
+test('a parked todo whose group heading is missing brings the group back', () => {
+  const model = parseTodos('## Parked\n- [ ] Learn Spanish (2026-08-01, group Personal)')
+  assert.deepEqual(model.groups, ['Personal'])
+  assert.match(serializeTodos(model, TODAY).body, /^## Personal\n\n## Parked/)
+})
+
+test('group names: case-insensitive matches, cleaned, and Parked/Done are reserved', () => {
+  const model = parseTodos('## Home\n- [ ] a (2026-10-22)\n## home\n- [ ] b (2026-10-22)')
+  assert.deepEqual(model.groups, ['Home'])
+  assert.deepEqual(
+    model.items.map((item) => item.group),
+    ['Home', 'Home'],
+  )
+  assert.equal(addGroup(model, '  Trip (Paris), maybe '), 'Trip Paris maybe')
+  assert.equal(addGroup(model, 'HOME'), null, 'already exists')
+  assert.equal(addGroup(model, 'Done'), null, 'reserved')
+  assert.equal(addGroup(model, ' () '), null, 'empty once cleaned')
+})
+
+test('new todos go to the top of their group', () => {
+  const model = parseTodos(GROUPED)
+  addTodos(model, 'Buy a new washer\nFind the stopcock', { today: TODAY, group: 'Home' })
+  addTodos(model, 'Call mum', { today: TODAY })
+  const { ungrouped, groups } = sections(model, TODAY)
+  assert.deepEqual(texts(ungrouped), ['Call mum', 'Reply to Sam'])
+  assert.deepEqual(texts(groups[0].items), ['Buy a new washer', 'Find the stopcock', 'Call the plumber', 'Fix the tap'])
+})
+
+test('moving todos: before another, to the end, between groups, one step, top and bottom', () => {
+  const model = parseTodos(GROUPED)
+  const find = (text) => model.items.find((item) => item.text === text)
+  const home = () => texts(sections(model, TODAY).groups[0].items)
+
+  placeTodo(model, find('Fix the tap'), { before: find('Call the plumber') })
+  assert.deepEqual(home(), ['Fix the tap', 'Call the plumber'])
+  assert.equal(find('Fix the tap').touched, '2026-10-20', 'reordering is not touching')
+
+  placeTodo(model, find('Reply to Sam'), { group: 'Home', today: TODAY })
+  assert.deepEqual(home(), ['Fix the tap', 'Call the plumber', 'Reply to Sam'])
+  assert.equal(find('Reply to Sam').touched, TODAY, 'changing group is')
+
+  assert.equal(moveByOne(model, find('Reply to Sam'), -1), true)
+  assert.deepEqual(home(), ['Fix the tap', 'Reply to Sam', 'Call the plumber'])
+  assert.equal(moveByOne(model, find('Fix the tap'), -1), false, 'already at the top')
+
+  moveToEdge(model, find('Fix the tap'), 'bottom')
+  assert.deepEqual(home(), ['Reply to Sam', 'Call the plumber', 'Fix the tap'])
+  moveToEdge(model, find('Fix the tap'), 'top')
+  assert.deepEqual(home(), ['Fix the tap', 'Reply to Sam', 'Call the plumber'])
+
+  moveToGroup(model, find('Call the plumber'), 'Trip to Paris', TODAY)
+  assert.deepEqual(texts(sections(model, TODAY).groups[1].items), ['Call the plumber', 'Book flights'])
+  moveToGroup(model, find('Call the plumber'), null, TODAY)
+  assert.deepEqual(texts(sections(model, TODAY).ungrouped), ['Call the plumber'])
+})
+
+test('Sort tidies one group without moving todos between groups', () => {
+  const model = parseTodos(GROUPED)
+  sortTodos(model, TODAY, 'Home')
+  assert.deepEqual(texts(sections(model, TODAY).groups[0].items), ['Call the plumber', 'Fix the tap'])
+  assert.deepEqual(texts(sections(model, TODAY).ungrouped), ['Reply to Sam'])
+})
+
+test('renaming, moving and deleting groups', () => {
+  const model = parseTodos(GROUPED)
+  assert.equal(renameGroup(model, 'Home', 'House'), 'House')
+  assert.equal(renameGroup(model, 'House', 'trip to paris'), null, 'name taken')
+  assert.deepEqual(
+    model.items.filter((item) => item.group === 'House').map((item) => item.text),
+    ['Call the plumber', 'Fix the tap', 'Clear out the garage', 'Buy milk'],
+    'parked and done todos follow the rename',
+  )
+  assert.equal(moveGroup(model, 'Trip to Paris', -1), true)
+  assert.deepEqual(model.groups, ['Trip to Paris', 'House'])
+  assert.equal(moveGroup(model, 'Trip to Paris', -1), false)
+  deleteGroup(model, 'House')
+  assert.deepEqual(model.groups, ['Trip to Paris'])
+  assert.deepEqual(texts(sections(model, TODAY).ungrouped), ['Reply to Sam', 'Call the plumber', 'Fix the tap'])
+  assert.equal(model.items.find((item) => item.text === 'Buy milk').group, null)
+})
+
+test('an empty group keeps its heading', () => {
+  const model = parseTodos('- [ ] a (2026-10-22)')
+  addGroup(model, 'Someday')
+  const body = serializeTodos(model, TODAY).body
+  assert.equal(body, '- [ ] a (2026-10-22)\n\n## Someday')
+  assert.deepEqual(parseTodos(body).groups, ['Someday'])
 })
 
 test('the note-list preview summarises the list', () => {

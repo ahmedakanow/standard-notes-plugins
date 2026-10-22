@@ -2,16 +2,22 @@
 //
 //   - [ ] Work out (2026-10-01, every day, done 2026-10-21, streak 4) #health
 //   - [ ] Renew passport (2026-10-01, due 2026-11-15, priority high, value high) #admin
-//   - [ ] Call the plumber (2026-10-22) #home
+//
+//   ## Home
+//   - [ ] Call the plumber (2026-10-22)
 //
 //   ## Parked
-//   - [ ] Learn Spanish (2026-08-01) #personal
+//   - [ ] Learn Spanish (2026-08-01, group Personal)
 //
 //   ## Done
-//   - [x] Buy milk (2026-10-20, done 2026-10-21) #home
+//   - [x] Buy milk (2026-10-20, done 2026-10-21, group Home)
 //
 // The first date is when the todo was last touched; the stale clock counts from it.
 // Only the text is required, so `- [ ] buy bread` typed on a phone is a valid todo.
+//
+// Any other `## Heading` is a group. Todos keep the order you give them (sortTodos tidies
+// them once by the rules in compareActive). Parked and done todos sit in their own
+// sections and remember their group with a `group Name` detail.
 //
 // One-off todos can be rated high or low on priority (how soon) and value (how much it
 // matters); unrated is the default. Ratings change the order, not the parking rules.
@@ -110,7 +116,18 @@ function readDetail(part) {
   if (streak) return ['streak', Number(streak[1])]
   const rating = /^(priority|value)\s+(high|low)$/i.exec(part)
   if (rating) return [rating[1].toLowerCase(), rating[2].toLowerCase()]
+  const group = /^group\s+(.+)$/i.exec(part)
+  const groupName = group && cleanGroupName(group[1])
+  if (groupName) return ['group', groupName]
   return null
+}
+
+const RESERVED_HEADINGS = new Set(['parked', 'done'])
+
+/** A usable group name, or null. Commas and brackets would clash with the details syntax. */
+export function cleanGroupName(name) {
+  const clean = String(name).replace(/[(),\r\n]/g, ' ').replace(/\s+/g, ' ').trim()
+  return clean && !RESERVED_HEADINGS.has(clean.toLowerCase()) ? clean : null
 }
 
 /** Reads `(2026-10-01, every day, due …, done …, streak 4)` off the end; anything else in brackets stays text. */
@@ -147,6 +164,7 @@ function parseItem(line, section) {
     streak: details.streak ?? 0,
     priority: repeat ? null : (details.priority ?? null),
     value: repeat ? null : (details.value ?? null),
+    group: repeat ? null : (details.group ?? null),
   }
 }
 
@@ -160,21 +178,38 @@ function tidyBlock(lines) {
 
 export function parseTodos(body, meta = {}) {
   const items = []
+  const groups = []
   const other = [] // anything that isn't a todo, kept verbatim
+  // Group names match whatever their case; the first spelling wins.
+  const useGroup = (name) => {
+    const clean = cleanGroupName(name)
+    if (!clean) return null
+    const existing = groups.find((group) => group.toLowerCase() === clean.toLowerCase())
+    if (existing) return existing
+    groups.push(clean)
+    return clean
+  }
+
   let section = 'active'
+  let group = null
   for (const line of body.replace(/\r\n?/g, '\n').split('\n')) {
     const heading = /^##\s+(.+?)\s*$/.exec(line)
     if (heading) {
       const name = heading[1].toLowerCase()
-      section = name === 'parked' || name === 'done' ? name : 'other'
+      group = RESERVED_HEADINGS.has(name) ? null : useGroup(heading[1])
+      section = RESERVED_HEADINGS.has(name) ? name : group ? 'active' : 'other'
       if (section === 'other') other.push(line)
       continue
     }
     const item = section === 'other' ? null : parseItem(line, section)
-    if (item) items.push(item)
-    else other.push(line)
+    if (!item) {
+      other.push(line)
+      continue
+    }
+    if (!item.repeat) item.group = item.group ? useGroup(item.group) : group
+    items.push(item)
   }
-  return { items, other: tidyBlock(other), reviewed: isIsoDate(meta.reviewed) ? meta.reviewed : null }
+  return { items, groups, other: tidyBlock(other), reviewed: isIsoDate(meta.reviewed) ? meta.reviewed : null }
 }
 
 function formatItem(item, today) {
@@ -187,16 +222,20 @@ function formatItem(item, today) {
     item.value && `value ${item.value}`,
     (item.repeat || item.status === 'done') && item.done && `done ${item.done}`,
     item.repeat && item.streak > 0 && `streak ${item.streak}`,
+    // Active todos sit under their group's heading; parked and done ones need reminding.
+    item.status !== 'active' && item.group && `group ${item.group}`,
   ].filter(Boolean)
   const detailText = details.length > 0 ? ` (${details.join(', ')})` : ''
   return `- [${isDone ? 'x' : ' '}] ${item.text}${detailText}${item.tags.map((tag) => ` #${tag}`).join('')}`
 }
 
 export function serializeTodos(model, today) {
-  const { routine, active, parked, done } = sections(model, today)
+  const { routine, ungrouped, groups, parked, done } = sections(model, today)
   const format = (item) => formatItem(item, today)
   const blocks = []
-  if (routine.length + active.length > 0) blocks.push([...routine, ...active].map(format).join('\n'))
+  if (routine.length + ungrouped.length > 0) blocks.push([...routine, ...ungrouped].map(format).join('\n'))
+  // Empty groups keep their heading so they survive until deleted.
+  for (const { name, items } of groups) blocks.push([`## ${name}`, ...items.map(format)].join('\n'))
   if (parked.length > 0) blocks.push(['## Parked', ...parked.map(format)].join('\n'))
   if (done.length > 0) blocks.push(['## Done', ...done.map(format)].join('\n'))
   if (model.other) blocks.push(model.other)
@@ -254,6 +293,10 @@ function activeRank(item, today) {
 
 const valueRank = (item) => (item.value === 'high' ? 0 : item.value === 'low' ? 2 : 1)
 
+/**
+ * The order Sort applies: overdue, high priority, due dated, the rest, low priority; high
+ * value first within each, then by due date, then newest.
+ */
 function compareActive(today) {
   return (a, b) => {
     const rank = activeRank(a, today) - activeRank(b, today) || valueRank(a) - valueRank(b)
@@ -264,19 +307,108 @@ function compareActive(today) {
   }
 }
 
+/** Whether `item` is an active one-off todo in `group` (null for ungrouped). */
+const inList = (item, group) => !item.repeat && item.status === 'active' && (item.group ?? null) === group
+
 /**
- * Routine (repeating todos, in the order they were written), then active todos (overdue,
- * high priority, due dated, the rest, low priority; high value first within each, then by
- * due date, then newest), parked and done (newest first).
+ * What to show, in order. Routine and active todos keep the order of `model.items`, which
+ * is the order you arranged them in; parked and done show newest first.
  */
 export function sections(model, today) {
   const oneOff = (status) => model.items.filter((item) => !item.repeat && item.status === status)
+  const ungrouped = model.items.filter((item) => inList(item, null))
+  const groups = model.groups.map((name) => ({ name, items: model.items.filter((item) => inList(item, name)) }))
   return {
     routine: model.items.filter((item) => item.repeat),
-    active: oneOff('active').sort(compareActive(today)),
+    ungrouped,
+    groups,
+    active: [...ungrouped, ...groups.flatMap((group) => group.items)],
     parked: oneOff('parked').sort((a, b) => newestFirst(a.touched, b.touched)),
     done: oneOff('done').sort((a, b) => newestFirst(a.done, b.done)),
   }
+}
+
+/** Tidies one list (a group name, or null for ungrouped), or every list, by compareActive. */
+export function sortTodos(model, today, group) {
+  const lists = group === undefined ? [null, ...model.groups] : [group]
+  for (const name of lists) {
+    const slots = []
+    model.items.forEach((item, index) => inList(item, name) && slots.push(index))
+    const sorted = slots.map((slot) => model.items[slot]).sort(compareActive(today))
+    slots.forEach((slot, n) => {
+      model.items[slot] = sorted[n]
+    })
+  }
+}
+
+/**
+ * Moves a todo into `group` just before `before`, or to the end of the group when `before`
+ * is null. Changing group counts as touching it; reordering doesn't.
+ */
+export function placeTodo(model, item, { group = item.group ?? null, before = null, today = null } = {}) {
+  if ((item.group ?? null) !== group) {
+    item.group = group
+    if (today) item.touched = today
+  }
+  model.items = model.items.filter((other) => other !== item)
+  let index = before ? model.items.indexOf(before) : -1
+  if (index === -1) {
+    const last = model.items.findLastIndex((other) => inList(other, group))
+    index = last === -1 ? model.items.length : last + 1
+  }
+  model.items.splice(index, 0, item)
+}
+
+const firstIn = (model, group, except) => model.items.find((other) => other !== except && inList(other, group))
+
+export function moveToGroup(model, item, group, today) {
+  placeTodo(model, item, { group, before: firstIn(model, group, item), today })
+}
+
+export function moveToEdge(model, item, edge) {
+  const group = item.group ?? null
+  placeTodo(model, item, { group, before: edge === 'top' ? firstIn(model, group, item) : null })
+}
+
+/** Moves a todo one place up (-1) or down (1) in its list. Returns false at either end. */
+export function moveByOne(model, item, step) {
+  const list = model.items.filter((other) => inList(other, item.group ?? null))
+  const index = list.indexOf(item)
+  const target = index + step
+  if (index === -1 || target < 0 || target >= list.length) return false
+  placeTodo(model, item, { before: step < 0 ? list[target] : (list[target + 1] ?? null) })
+  return true
+}
+
+export function addGroup(model, name) {
+  const clean = cleanGroupName(name)
+  if (!clean || model.groups.some((group) => group.toLowerCase() === clean.toLowerCase())) return null
+  model.groups.push(clean)
+  return clean
+}
+
+export function renameGroup(model, from, to) {
+  const clean = cleanGroupName(to)
+  const taken = model.groups.some((group) => group !== from && group.toLowerCase() === clean?.toLowerCase())
+  if (!clean || taken) return null
+  model.groups = model.groups.map((group) => (group === from ? clean : group))
+  for (const item of model.items) if (item.group === from) item.group = clean
+  return clean
+}
+
+export function moveGroup(model, name, step) {
+  const index = model.groups.indexOf(name)
+  const target = index + step
+  if (index === -1 || target < 0 || target >= model.groups.length) return false
+  model.groups.splice(index, 1)
+  model.groups.splice(target, 0, name)
+  return true
+}
+
+/** Removes a group. Its todos, including parked and done ones, become ungrouped. */
+export function deleteGroup(model, name) {
+  model.groups = model.groups.filter((group) => group !== name)
+  for (const item of model.items) if (item.group === name) item.group = null
 }
 
 /** The routine split into what's on today (scheduled, or already done today) and the rest. */
@@ -294,15 +426,18 @@ export function parseInput(input) {
     .filter(Boolean)
 }
 
-export function addTodos(model, input, { today, due = null }) {
+/** Adds one todo per line at the top of `group` (null for ungrouped). */
+export function addTodos(model, input, { today, due = null, group = null }) {
   const added = parseInput(input).map((item) => ({
     ...item,
     touched: today,
     due: item.repeat ? null : (item.due ?? due),
     done: null,
     streak: 0,
+    group: item.repeat ? null : group,
   }))
-  model.items.push(...added)
+  const first = model.items.findIndex((item) => inList(item, group))
+  model.items.splice(first === -1 ? model.items.length : first, 0, ...added)
   return added
 }
 

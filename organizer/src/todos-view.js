@@ -4,17 +4,25 @@ import {
   DAY_NAMES,
   EVERY_DAY,
   WEEK_ORDER,
+  addGroup,
   addTodos,
   allTags,
   bringBack,
   complete,
+  deleteGroup,
   describeDays,
   doToday,
   editTodo,
   markReviewed,
+  moveByOne,
+  moveGroup,
+  moveToEdge,
+  moveToGroup,
   nextScheduled,
   park,
+  placeTodo,
   removeTodo,
+  renameGroup,
   reopen,
   reviewDue,
   routineFor,
@@ -22,6 +30,7 @@ import {
   setDue,
   setRating,
   setRepeat,
+  sortTodos,
   undoToday,
 } from './todos.js'
 
@@ -53,6 +62,15 @@ export function mountTodos(root, session) {
     showDone: false,
     showLater: false,
     showSettings: false,
+    collapsed: new Set(), // names of collapsed groups
+    groupMenu: null, // group whose actions are open
+    confirmGroupDelete: null,
+    renaming: null, // group being renamed
+    renameDraft: null,
+    addingTo: null, // group with its add box open
+    newGroup: null, // draft name while creating a group, or null
+    groupError: null,
+    focusTarget: null, // data-focus key to focus after the next render
   }
 
   const addInput = h('textarea', {
@@ -87,6 +105,7 @@ export function mountTodos(root, session) {
     '⚙︎',
   )
   const body = h('div', { class: 'todos-body' })
+  let rendering = false
 
   root.replaceChildren(
     h(
@@ -119,12 +138,7 @@ export function mountTodos(root, session) {
     if (session.readOnly) return
     const added = addTodos(session.model, addInput.value, { today: session.context().today, due: addDue.value || null })
     if (added.length === 0) return
-    // Adding while filtered files the new todo under that tag or rating.
-    for (const item of added) {
-      if (ui.filter === '!priority') item.priority ||= 'high'
-      else if (ui.filter === '!value') item.value ||= 'high'
-      else if (ui.filter && item.tags.length === 0) item.tags.push(ui.filter)
-    }
+    applyFilter(added)
     addInput.value = ''
     addDue.value = ''
     autosize(addInput)
@@ -132,7 +146,22 @@ export function mountTodos(root, session) {
     addInput.focus()
   }
 
+  /** Adding while filtered files new todos under that tag or rating. */
+  function applyFilter(items) {
+    for (const item of items) {
+      if (ui.filter === '!priority') item.priority ||= 'high'
+      else if (ui.filter === '!value') item.value ||= 'high'
+      else if (ui.filter && item.tags.length === 0) item.tags.push(ui.filter)
+    }
+  }
+
+  function filterLabel() {
+    const rating = RATING_FILTERS.find((candidate) => candidate.id === ui.filter)
+    return rating ? rating.label.toLowerCase() : `#${ui.filter}`
+  }
+
   const label = (item) => [item.text, ...item.tags.map((tag) => `#${tag}`)].join(' ')
+  const inGroup = (item) => (item.group ? ` · in ${item.group}` : '')
 
   const ratingBadges = (item) =>
     ['priority', 'value']
@@ -148,7 +177,8 @@ export function mountTodos(root, session) {
     const ratings = RATING_FILTERS.filter((rating) => model.items.some(rating.matches))
     if (ui.filter && ![...ratings.map((rating) => rating.id), ...tags].includes(ui.filter)) ui.filter = null
     const shown = (item) => matchesFilter(item, ui.filter)
-    const { active, parked, done } = sections(model, ctx.today)
+    const lists = sections(model, ctx.today)
+    const { parked, done } = lists
     const routine = routineFor(model, ctx.today)
     const routineToday = routine.today.filter(shown)
     const routineLater = routine.later.filter(shown)
@@ -162,14 +192,7 @@ export function mountTodos(root, session) {
         : !session.readOnly && reviewDue(model, ctx.today) && reviewBanner(parked.length),
       tags.length + ratings.length > 0 && chips(tags, ratings),
       hasRoutine && routineSection(routineToday, routineLater, ctx),
-      hasRoutine
-        ? h(
-            'section',
-            { class: 'todo-group', 'aria-label': 'To do' },
-            h('h2', { class: 'section-title' }, 'To do'),
-            activeList(active.filter(shown), ctx),
-          )
-        : activeList(active.filter(shown), ctx),
+      todoArea(lists, ctx, shown),
       parked.some(shown) &&
         group(
           'showParked',
@@ -193,15 +216,22 @@ export function mountTodos(root, session) {
           h('pre', { class: 'other-text' }, model.other),
         ),
     ]
+    rendering = true
     body.replaceChildren(...parts.filter(Boolean))
+    rendering = false
     body.querySelectorAll('.todo-text').forEach(autosize)
 
     settingsButton.setAttribute('aria-expanded', String(ui.showSettings))
     lockBadge.hidden = !session.readOnly
+    // data-disabled marks controls that are off for their own reasons, like "Move up" on the first group.
     for (const control of root.querySelectorAll('input, textarea, button, select')) {
-      if (!('always' in control.dataset)) control.disabled = session.readOnly
+      if (!('always' in control.dataset)) control.disabled = session.readOnly || 'disabled' in control.dataset
     }
     restoreFocus(root, focus)
+    if (ui.focusTarget) {
+      root.querySelector(`[data-focus="${CSS.escape(ui.focusTarget)}"]`)?.focus()
+      ui.focusTarget = null
+    }
   }
 
   function chips(tags, ratings) {
@@ -263,15 +293,461 @@ export function mountTodos(root, session) {
     return h('div', { class: 'option-row' }, field('priority', 'Priority'), field('value', 'Value'))
   }
 
-  function activeList(items, ctx) {
-    if (items.length === 0) {
-      return h('p', { class: 'empty' }, ui.filter ? `Nothing to do in #${ui.filter}.` : 'Nothing to do. Enjoy it.')
-    }
-    return h(
+  const sortButton = (text, ariaLabel, sort) =>
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'text-button',
+        'aria-label': ariaLabel,
+        onclick: () => {
+          sort()
+          commit()
+        },
+      },
+      text,
+    )
+
+  // Lists are drop zones for dragging: `data-drop-group` names the group ('' for ungrouped).
+  const todoList = (items, ctx) =>
+    h(
       'ul',
-      { class: 'todo-list' },
+      { class: 'todo-list', 'data-list': '' },
       items.map((item) => activeRow(item, ctx)),
     )
+
+  function todoArea(lists, ctx, shown) {
+    const filtering = Boolean(ui.filter)
+    const groups = lists.groups
+      .map((group) => ({ ...group, items: group.items.filter(shown) }))
+      .filter((group) => !filtering || group.items.length > 0)
+    const ungrouped = lists.ungrouped.filter(shown)
+    const nothing = ungrouped.length === 0 && groups.every((group) => group.items.length === 0)
+    return h(
+      'div',
+      { class: 'todo-area' },
+      h(
+        'section',
+        { class: 'todo-group', 'aria-label': 'To do', 'data-drop-group': '' },
+        h(
+          'div',
+          { class: 'section-head' },
+          h('h2', { class: 'section-title' }, 'To do'),
+          lists.active.length > 1 &&
+            sortButton('Sort all', 'Sort every list by due date and priority', () => sortTodos(session.model, ctx.today)),
+        ),
+        todoList(ungrouped, ctx),
+        nothing &&
+          (filtering || groups.length === 0) &&
+          h('p', { class: 'empty' }, filtering ? `Nothing to do in ${filterLabel()}.` : 'Nothing to do. Enjoy it.'),
+      ),
+      groups.map((group) => groupSection(group, ctx)),
+      !filtering && newGroupControl(),
+    )
+  }
+
+  function groupSection({ name, items }, ctx) {
+    const collapsed = ui.collapsed.has(name)
+    const menuOpen = ui.groupMenu === name
+    return h(
+      'section',
+      { class: 'todo-group group-section', 'aria-label': name, 'data-drop-group': name },
+      h(
+        'div',
+        { class: 'section-head group-head' },
+        ui.renaming === name
+          ? renameInput(name)
+          : h(
+              'button',
+              {
+                type: 'button',
+                class: 'group-toggle',
+                'aria-expanded': String(!collapsed),
+                'data-always': '',
+                onclick: () => {
+                  if (collapsed) ui.collapsed.delete(name)
+                  else ui.collapsed.add(name)
+                  render()
+                },
+              },
+              h('span', { class: 'caret', 'aria-hidden': 'true' }, collapsed ? '▸' : '▾'),
+              h('span', { class: 'group-name' }, name),
+              h('span', { class: 'group-count' }, String(items.length)),
+            ),
+        h(
+          'div',
+          { class: 'group-tools' },
+          items.length > 1 &&
+            !collapsed &&
+            sortButton('Sort', `Sort ${name} by due date and priority`, () => sortTodos(session.model, ctx.today, name)),
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'icon-button',
+              'aria-label': `Add a todo to ${name}`,
+              onclick: () => {
+                ui.addingTo = name
+                ui.collapsed.delete(name)
+                ui.focusTarget = `add-${name}`
+                render()
+              },
+            },
+            '+',
+          ),
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'icon-button',
+              'aria-label': `More actions for group ${name}`,
+              'aria-expanded': String(menuOpen),
+              onclick: () => {
+                ui.groupMenu = menuOpen ? null : name
+                ui.confirmGroupDelete = null
+                render()
+              },
+            },
+            '⋯',
+          ),
+        ),
+      ),
+      ui.renaming === name && ui.groupError && h('p', { class: 'meta error' }, ui.groupError),
+      menuOpen && groupActions(name),
+      ui.addingTo === name && groupAddRow(name, ctx),
+      !collapsed && todoList(items, ctx),
+      !collapsed && items.length === 0 && ui.addingTo !== name && h('p', { class: 'empty' }, 'Nothing here yet.'),
+    )
+  }
+
+  function groupActions(name) {
+    const { groups } = session.model
+    const index = groups.indexOf(name)
+    const confirming = ui.confirmGroupDelete === name
+    const button = (text, onclick, props = {}) => h('button', { type: 'button', class: 'button', onclick, ...props }, text)
+    return h(
+      'div',
+      { class: 'button-row group-actions' },
+      button('Rename', () => {
+        ui.renaming = name
+        ui.groupError = null
+        ui.focusTarget = `rename-${name}`
+        render()
+      }),
+      button('Move up', () => moveGroup(session.model, name, -1) && commit(), { 'data-disabled': index === 0 }),
+      button('Move down', () => moveGroup(session.model, name, 1) && commit(), {
+        'data-disabled': index === groups.length - 1,
+      }),
+      button(
+        confirming ? 'Tap again: its todos become ungrouped' : 'Delete group',
+        () => {
+          if (!confirming) {
+            ui.confirmGroupDelete = name
+            render()
+            setTimeout(() => {
+              if (ui.confirmGroupDelete !== name) return
+              ui.confirmGroupDelete = null
+              render()
+            }, DELETE_CONFIRM_MS)
+            return
+          }
+          deleteGroup(session.model, name)
+          ui.groupMenu = null
+          ui.confirmGroupDelete = null
+          ui.collapsed.delete(name)
+          commit()
+        },
+        { class: `button danger${confirming ? ' is-confirming' : ''}` },
+      ),
+    )
+  }
+
+  function renameInput(name) {
+    // Enter on a bad name explains why; leaving the box with one just cancels.
+    const finish = (value, explainError) => {
+      if (ui.renaming !== name) return
+      if (value !== null && value.trim() !== name) {
+        const renamed = renameGroup(session.model, name, value)
+        if (renamed) {
+          if (ui.collapsed.delete(name)) ui.collapsed.add(renamed)
+          session.save()
+        } else if (explainError) {
+          ui.groupError = 'That name is taken, empty, or reserved (Parked, Done).'
+          ui.focusTarget = `rename-${name}`
+          render()
+          return
+        }
+      }
+      ui.renaming = null
+      ui.renameDraft = null
+      ui.groupMenu = null
+      ui.groupError = null
+      render()
+    }
+    return h('input', {
+      type: 'text',
+      class: 'field group-rename',
+      value: ui.renameDraft ?? name,
+      'aria-label': `New name for ${name}`,
+      enterkeyhint: 'done',
+      'data-focus': `rename-${name}`,
+      oninput: (event) => {
+        ui.renameDraft = event.target.value
+      },
+      onkeydown: (event) => {
+        if (event.key === 'Escape') finish(null, false)
+        if (event.key !== 'Enter') return
+        event.preventDefault()
+        finish(event.target.value, true)
+      },
+      // Chrome blurs a focused element when a re-render removes it; that isn't the user leaving.
+      onblur: (event) => rendering || finish(event.target.value, false),
+    })
+  }
+
+  function groupAddRow(name, ctx) {
+    return h(
+      'div',
+      { class: 'group-add-row' },
+      h('textarea', {
+        class: 'add-input',
+        rows: 1,
+        placeholder: `Add to ${name}…`,
+        'aria-label': `New todo in ${name}`,
+        enterkeyhint: 'done',
+        'data-focus': `add-${name}`,
+        oninput: (event) => autosize(event.target),
+        onkeydown: (event) => {
+          if (event.key === 'Escape') {
+            ui.addingTo = null
+            render()
+            return
+          }
+          if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+          event.preventDefault()
+          const added = addTodos(session.model, event.target.value, { today: ctx.today, group: name })
+          if (added.length === 0) {
+            ui.addingTo = null
+            render()
+            return
+          }
+          applyFilter(added)
+          commit()
+        },
+      }),
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'text-button',
+          onclick: () => {
+            ui.addingTo = null
+            render()
+          },
+        },
+        'Done',
+      ),
+    )
+  }
+
+  function newGroupControl() {
+    if (ui.newGroup === null) {
+      return h(
+        'button',
+        {
+          type: 'button',
+          class: 'text-button new-group',
+          onclick: () => {
+            ui.newGroup = ''
+            ui.groupError = null
+            ui.focusTarget = 'new-group'
+            render()
+          },
+        },
+        '+ New group',
+      )
+    }
+    const create = () => {
+      const name = addGroup(session.model, ui.newGroup)
+      if (!name) {
+        ui.groupError = 'That name is taken, empty, or reserved (Parked, Done).'
+        ui.focusTarget = 'new-group'
+        render()
+        return
+      }
+      ui.newGroup = null
+      ui.groupError = null
+      ui.addingTo = name
+      ui.focusTarget = `add-${name}`
+      commit()
+    }
+    return h(
+      'div',
+      { class: 'new-group-row' },
+      h('input', {
+        type: 'text',
+        class: 'field',
+        value: ui.newGroup,
+        placeholder: 'Group name',
+        'aria-label': 'New group name',
+        enterkeyhint: 'done',
+        'data-focus': 'new-group',
+        oninput: (event) => {
+          ui.newGroup = event.target.value
+        },
+        onkeydown: (event) => {
+          if (event.key === 'Escape') {
+            ui.newGroup = null
+            render()
+          } else if (event.key === 'Enter') {
+            event.preventDefault()
+            create()
+          }
+        },
+      }),
+      h('button', { type: 'button', class: 'button primary', onclick: create }, 'Create'),
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'text-button',
+          onclick: () => {
+            ui.newGroup = null
+            render()
+          },
+        },
+        'Cancel',
+      ),
+      ui.groupError && h('p', { class: 'meta error' }, ui.groupError),
+    )
+  }
+
+  function moveControls(item, ctx) {
+    const { groups } = session.model
+    const toEdge = (edge) => () => {
+      moveToEdge(session.model, item, edge)
+      commit()
+    }
+    return h(
+      'div',
+      { class: 'option-row' },
+      groups.length > 0 &&
+        h(
+          'label',
+          { class: 'option-field' },
+          h('span', { class: 'field-label' }, 'Group'),
+          h(
+            'select',
+            {
+              class: 'field',
+              onchange: (event) => {
+                moveToGroup(session.model, item, event.target.value || null, ctx.today)
+                commit()
+              },
+            },
+            h('option', { value: '', selected: !item.group }, 'No group'),
+            groups.map((name) => h('option', { value: name, selected: item.group === name }, name)),
+          ),
+        ),
+      h(
+        'div',
+        { class: 'option-field' },
+        h('span', { class: 'field-label' }, 'Move'),
+        h(
+          'div',
+          { class: 'segmented', role: 'group', 'aria-label': 'Move' },
+          h('button', { type: 'button', class: 'segment', onclick: toEdge('top') }, 'To top'),
+          h('button', { type: 'button', class: 'segment', onclick: toEdge('bottom') }, 'To bottom'),
+        ),
+      ),
+    )
+  }
+
+  function dragHandle(item) {
+    return h(
+      'button',
+      {
+        type: 'button',
+        class: 'drag-handle',
+        'aria-label': `Move ${item.text}: drag, or use the arrow keys`,
+        'data-focus': `handle-${item.id}`,
+        onpointerdown: (event) => startDrag(event, item),
+        onkeydown: (event) => {
+          if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+          event.preventDefault()
+          if (moveByOne(session.model, item, event.key === 'ArrowUp' ? -1 : 1)) commit()
+        },
+      },
+      '⠿',
+    )
+  }
+
+  /** Drags a todo by its handle; works with mouse and touch through pointer events. */
+  function startDrag(event, item) {
+    if (session.readOnly || event.button > 0) return
+    event.preventDefault()
+    const handle = event.currentTarget
+    const row = handle.closest('.todo')
+    handle.setPointerCapture(event.pointerId)
+    row.classList.add('is-dragging')
+    document.body.classList.add('is-dragging-todo')
+    const indicator = h('li', { class: 'drop-indicator', 'aria-hidden': 'true' })
+    let target = null
+    let pointer = { x: event.clientX, y: event.clientY }
+
+    const locate = ({ x, y }) => {
+      const zone = document.elementFromPoint(x, y)?.closest('[data-drop-group]')
+      if (!zone || !root.contains(zone)) return null
+      const list = zone.querySelector(':scope > .todo-list[data-list]')
+      const rows = list ? [...list.children].filter((child) => child.matches('.todo[data-id]') && child !== row) : []
+      const next = rows.find((candidate) => {
+        const box = candidate.getBoundingClientRect()
+        return y < box.top + box.height / 2
+      })
+      return { zone, list, next: next ?? null, group: zone.dataset.dropGroup || null }
+    }
+    const update = () => {
+      target = locate(pointer)
+      indicator.remove()
+      root.querySelector('.is-drop-target')?.classList.remove('is-drop-target')
+      if (!target) return
+      if (target.list) target.list.insertBefore(indicator, target.next)
+      else target.zone.classList.add('is-drop-target') // a collapsed group
+    }
+    // Scrolls when the pointer is near the top or bottom edge.
+    let scrollFrame = requestAnimationFrame(function scroll() {
+      const edge = 48
+      const step = pointer.y < edge ? -12 : pointer.y > window.innerHeight - edge ? 12 : 0
+      if (step) {
+        window.scrollBy(0, step)
+        update()
+      }
+      scrollFrame = requestAnimationFrame(scroll)
+    })
+
+    const onMove = (moveEvent) => {
+      pointer = { x: moveEvent.clientX, y: moveEvent.clientY }
+      update()
+    }
+    const finish = (drop) => {
+      cancelAnimationFrame(scrollFrame)
+      handle.removeEventListener('pointermove', onMove)
+      handle.removeEventListener('pointerup', onUp)
+      handle.removeEventListener('pointercancel', onCancel)
+      document.body.classList.remove('is-dragging-todo')
+      indicator.remove()
+      if (!drop || !target) return render()
+      const before = target.next
+        ? session.model.items.find((candidate) => candidate.id === Number(target.next.dataset.id))
+        : null
+      placeTodo(session.model, item, { group: target.group, before, today: session.context().today })
+      commit()
+    }
+    const onUp = () => finish(true)
+    const onCancel = () => finish(false)
+    handle.addEventListener('pointermove', onMove)
+    handle.addEventListener('pointerup', onUp)
+    handle.addEventListener('pointercancel', onCancel)
   }
 
   function moreButton(item) {
@@ -467,7 +943,8 @@ export function mountTodos(root, session) {
     const overdue = item.due && item.due < ctx.today
     return h(
       'li',
-      { class: `todo${overdue ? ' is-overdue' : ''}` },
+      { class: `todo has-handle${overdue ? ' is-overdue' : ''}`, dataset: { id: item.id } },
+      dragHandle(item),
       h('input', {
         type: 'checkbox',
         class: 'todo-check',
@@ -501,6 +978,7 @@ export function mountTodos(root, session) {
           { class: 'todo-actions' },
           repeatControls(item, ctx),
           ratingControls(item, ctx),
+          moveControls(item, ctx),
           h(
             'label',
             { class: 'inline-field' },
@@ -544,7 +1022,7 @@ export function mountTodos(root, session) {
         h(
           'div',
           { class: 'todo-meta' },
-          h('span', { class: 'meta' }, `Untouched since ${shortDate(item.touched, ctx.today)}`),
+          h('span', { class: 'meta' }, `Untouched since ${shortDate(item.touched, ctx.today)}${inGroup(item)}`),
           ratingBadges(item),
         ),
       ),
@@ -555,6 +1033,7 @@ export function mountTodos(root, session) {
           class: 'button',
           onclick: () => {
             bringBack(item, ctx.today)
+            moveToEdge(session.model, item, 'top')
             commit()
           },
         },
@@ -594,6 +1073,7 @@ export function mountTodos(root, session) {
         'aria-label': `Not done: ${item.text}`,
         onchange: () => {
           reopen(item, ctx.today)
+          moveToEdge(session.model, item, 'top')
           commit()
         },
       }),
@@ -601,7 +1081,7 @@ export function mountTodos(root, session) {
         'div',
         { class: 'todo-main' },
         h('span', { class: 'todo-label' }, label(item)),
-        h('span', { class: 'meta' }, `Done ${shortDate(item.done, ctx.today)}`),
+        h('span', { class: 'meta' }, `Done ${shortDate(item.done, ctx.today)}${inGroup(item)}`),
       ),
       moreButton(item),
       ui.openActions === item.id && h('div', { class: 'todo-actions' }, deleteButton(item)),
@@ -697,13 +1177,25 @@ export function mountTodos(root, session) {
       h(
         'div',
         { class: 'todo-meta' },
-        h('span', { class: 'meta' }, `Untouched since ${shortDate(item.touched, ctx.today)}`),
+        h('span', { class: 'meta' }, `Untouched since ${shortDate(item.touched, ctx.today)}${inGroup(item)}`),
         ratingBadges(item),
       ),
       h(
         'div',
         { class: 'button-row' },
-        h('button', { type: 'button', class: 'button primary', onclick: () => decide(() => bringBack(item, ctx.today)) }, 'Bring back'),
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'button primary',
+            onclick: () =>
+              decide(() => {
+                bringBack(item, ctx.today)
+                moveToEdge(session.model, item, 'top')
+              }),
+          },
+          'Bring back',
+        ),
         h('button', { type: 'button', class: 'button', onclick: () => decide(() => {}) }, 'Keep parked'),
         h('button', { type: 'button', class: 'button', onclick: () => decide(() => complete(item, ctx.today)) }, 'Done'),
         deleteButton(item, () => {
