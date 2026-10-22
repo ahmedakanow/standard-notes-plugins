@@ -62,7 +62,7 @@ export function mountTodos(root, session) {
     showDone: false,
     showLater: false,
     showSettings: false,
-    collapsed: new Set(), // names of collapsed groups
+    toggled: new Set(), // groups opened or closed against the "Groups start" setting
     groupMenu: null, // group whose actions are open
     confirmGroupDelete: null,
     renaming: null, // group being renamed
@@ -162,6 +162,13 @@ export function mountTodos(root, session) {
 
   const label = (item) => [item.text, ...item.tags.map((tag) => `#${tag}`)].join(' ')
   const inGroup = (item) => (item.group ? ` · in ${item.group}` : '')
+
+  // Groups follow the "Groups start" setting unless toggled; a filter opens them all.
+  const isCollapsed = (name, ctx) => !ui.filter && ctx.groupsCollapsed !== ui.toggled.has(name)
+  function setCollapsed(name, collapsed) {
+    if (collapsed === session.context().groupsCollapsed) ui.toggled.delete(name)
+    else ui.toggled.add(name)
+  }
 
   const ratingBadges = (item) =>
     ['priority', 'value']
@@ -347,8 +354,14 @@ export function mountTodos(root, session) {
   }
 
   function groupSection({ name, items }, ctx) {
-    const collapsed = ui.collapsed.has(name)
+    const collapsed = isCollapsed(name, ctx)
     const menuOpen = ui.groupMenu === name
+    const overdue = items.filter((item) => item.due && item.due < ctx.today).length
+    const title = [
+      h('span', { class: 'group-name' }, name),
+      h('span', { class: 'group-count' }, String(items.length)),
+      collapsed && overdue > 0 && h('span', { class: 'group-overdue' }, `${overdue} overdue`),
+    ]
     return h(
       'section',
       { class: 'todo-group group-section', 'aria-label': name, 'data-drop-group': name },
@@ -357,23 +370,23 @@ export function mountTodos(root, session) {
         { class: 'section-head group-head' },
         ui.renaming === name
           ? renameInput(name)
-          : h(
-              'button',
-              {
-                type: 'button',
-                class: 'group-toggle',
-                'aria-expanded': String(!collapsed),
-                'data-always': '',
-                onclick: () => {
-                  if (collapsed) ui.collapsed.delete(name)
-                  else ui.collapsed.add(name)
-                  render()
+          : ui.filter
+            ? h('span', { class: 'group-toggle' }, title) // open while filtering, so nothing to toggle
+            : h(
+                'button',
+                {
+                  type: 'button',
+                  class: 'group-toggle',
+                  'aria-expanded': String(!collapsed),
+                  'data-always': '',
+                  onclick: () => {
+                    setCollapsed(name, !collapsed)
+                    render()
+                  },
                 },
-              },
-              h('span', { class: 'caret', 'aria-hidden': 'true' }, collapsed ? '▸' : '▾'),
-              h('span', { class: 'group-name' }, name),
-              h('span', { class: 'group-count' }, String(items.length)),
-            ),
+                h('span', { class: 'caret', 'aria-hidden': 'true' }, collapsed ? '▸' : '▾'),
+                title,
+              ),
         h(
           'div',
           { class: 'group-tools' },
@@ -388,7 +401,7 @@ export function mountTodos(root, session) {
               'aria-label': `Add a todo to ${name}`,
               onclick: () => {
                 ui.addingTo = name
-                ui.collapsed.delete(name)
+                setCollapsed(name, false)
                 ui.focusTarget = `add-${name}`
                 render()
               },
@@ -454,7 +467,7 @@ export function mountTodos(root, session) {
           deleteGroup(session.model, name)
           ui.groupMenu = null
           ui.confirmGroupDelete = null
-          ui.collapsed.delete(name)
+          ui.toggled.delete(name)
           commit()
         },
         { class: `button danger${confirming ? ' is-confirming' : ''}` },
@@ -469,7 +482,7 @@ export function mountTodos(root, session) {
       if (value !== null && value.trim() !== name) {
         const renamed = renameGroup(session.model, name, value)
         if (renamed) {
-          if (ui.collapsed.delete(name)) ui.collapsed.add(renamed)
+          if (ui.toggled.delete(name)) ui.toggled.add(renamed)
           session.save()
         } else if (explainError) {
           ui.groupError = 'That name is taken, empty, or reserved (Parked, Done).'
@@ -578,6 +591,7 @@ export function mountTodos(root, session) {
       ui.newGroup = null
       ui.groupError = null
       ui.addingTo = name
+      setCollapsed(name, false)
       ui.focusTarget = `add-${name}`
       commit()
     }
@@ -1243,7 +1257,36 @@ export function mountTodos(root, session) {
         }),
         'days',
       ),
-      h('p', { class: 'meta' }, 'Applies to all your Todos notes. Todos with a due date are never parked automatically.'),
+      h(
+        'div',
+        { class: 'option-field' },
+        h('span', { class: 'field-label' }, 'Groups start'),
+        h(
+          'div',
+          { class: 'segmented', role: 'group', 'aria-label': 'Groups start' },
+          ['collapsed', 'expanded'].map((state) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'segment',
+                'aria-pressed': String((state === 'collapsed') === ctx.groupsCollapsed),
+                'data-always': '',
+                onclick: () => {
+                  ui.toggled.clear()
+                  session.setSetting('groupsStart', state)
+                },
+              },
+              state === 'collapsed' ? 'Collapsed' : 'Expanded',
+            ),
+          ),
+        ),
+      ),
+      h(
+        'p',
+        { class: 'meta' },
+        'These apply to all your Todos notes. Todos with a due date are never parked automatically.',
+      ),
     )
   }
 

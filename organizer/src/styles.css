@@ -622,6 +622,12 @@ h1 {
   color: var(--muted);
 }
 
+.group-overdue {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--danger);
+}
+
 .group-tools {
   display: flex;
   align-items: center;

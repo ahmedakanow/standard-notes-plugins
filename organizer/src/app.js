@@ -29,6 +29,7 @@ function context() {
   return {
     today: todayIso(),
     staleDays: Number.isInteger(staleDays) && staleDays > 0 ? staleDays : DEFAULT_STALE_DAYS,
+    groupsCollapsed: host.getSetting('groupsStart') !== 'expanded',
   }
 }
 

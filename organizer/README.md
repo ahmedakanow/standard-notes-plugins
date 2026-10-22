@@ -12,14 +12,14 @@ Everything is stored as plain Markdown, so your notes still read well in the pla
 One note holds all your todos. Put them in **groups** (Home, Work, Trip to Paris…), and label across groups with `#tags` for the filter buttons at the top.
 
 - **Add** with the box at the top, or straight into a group with its **+**. Add `#tag` to label a todo, pick an optional due date, or paste a list to add one todo per line. New todos go to the top.
-- **Groups:** **+ New group** at the bottom. A group's **⋯** menu renames, moves or deletes it; deleting a group keeps its todos, ungrouped. Tap a group's name to collapse it.
+- **Groups:** **+ New group** at the bottom. A group's **⋯** menu renames, moves or deletes it; deleting a group keeps its todos, ungrouped. Groups start collapsed, showing how many todos they hold and how many are overdue. Tap a group's name to open it. Filtering by a tag or rating opens every group with a match.
 - **Your order:** drag a todo by its **⠿** handle, within a group or into another, or use the arrow keys on the handle. A todo's **⋯** menu also has **Group** and **To top / To bottom**. Nothing reorders itself until you tap **Sort** (one group) or **Sort all**, which tidies by: overdue, then high priority, then by due date, then the rest, then low priority, with high value first within each.
 - **Priority and value:** from a todo's **⋯** menu, rate its priority (how soon) and value (how much it matters) as High or Low. Both are optional. Once something is rated high, **High priority** and **High value** filter buttons appear next to your tags. Adding a todo while one of them is on rates it high.
 - **Stale todos get parked, never lost.** A todo you haven't touched for 14 days moves to **Parked**. Adding, editing or bringing back a todo resets its clock, and todos with a due date are never parked automatically. You can also park a todo yourself from its **⋯** menu.
 - **Weekly review:** when there are parked todos, a banner offers a quick review: *Bring back*, *Keep parked*, *Done* or *Delete* for each one. *Not now* asks again in a week.
 - **Done** todos are kept, with the date you finished them.
 - **Routine:** make a todo repeat from its **⋯** menu, either **every day** or on **chosen days** (say Mon, Wed, Fri). Repeating todos sit in a Routine group at the top and show up only on their days. Ticking one crosses it out for the rest of the day and it comes back the next scheduled day. Each one keeps a 🔥 streak of scheduled days done in a row, which resets if you miss one. They're never parked and don't fill up Done.
-- **Settings (⚙︎):** change the 14 days. The setting syncs through your Standard Notes account and applies to every Todos note.
+- **Settings (⚙︎):** change the 14 days, and whether groups start **Collapsed** or **Expanded**. Settings sync through your Standard Notes account and apply to every Todos note.
 
 In the plain editor a Todos note looks like this:
 
