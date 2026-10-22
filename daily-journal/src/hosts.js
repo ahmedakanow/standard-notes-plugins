@@ -8,9 +8,28 @@ export function createHost() {
   return window.parent !== window ? createRelayHost() : createPreviewHost()
 }
 
+/**
+ * The window ComponentRelay talks through. The Standard Notes mobile apps run from file://,
+ * so their messages arrive from origin "null". Relay 2.2.2 then replies with targetOrigin
+ * "null", which postMessage rejects, and the plugin never receives its note. An opaque
+ * origin can't be named, so reply with '*' in that case only. (Fixed upstream in
+ * component-relay b728107, which isn't published to npm.)
+ */
+export function relayWindowFor(win) {
+  return {
+    document: win.document,
+    addEventListener: win.addEventListener.bind(win),
+    removeEventListener: win.removeEventListener.bind(win),
+    parent: {
+      postMessage: (message, targetOrigin) =>
+        win.parent.postMessage(message, targetOrigin === 'null' ? '*' : targetOrigin),
+    },
+  }
+}
+
 function createRelayHost() {
   const relay = new window.ComponentRelay({
-    targetWindow: window,
+    targetWindow: relayWindowFor(window),
     options: { coallesedSaving: true, coallesedSavingDelay: 400 },
   })
   return {
