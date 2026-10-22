@@ -24,6 +24,11 @@ export function addDays(iso, days) {
   return date.toISOString().slice(0, 10)
 }
 
+/** 0 = Sunday … 6 = Saturday. */
+export function weekdayOf(iso) {
+  return toUtc(iso).getUTCDay()
+}
+
 /** 'Nov 15', with the year only when it isn't this year. */
 export function shortDate(iso, today) {
   const [year, month, day] = iso.split('-').map(Number)

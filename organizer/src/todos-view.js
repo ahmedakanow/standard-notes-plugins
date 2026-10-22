@@ -1,18 +1,27 @@
-import { shortDate } from './dates.js'
+import { shortDate, weekdayOf } from './dates.js'
 import { autosize, captureFocus, h, restoreFocus } from './dom.js'
 import {
+  DAY_NAMES,
+  EVERY_DAY,
+  WEEK_ORDER,
   addTodos,
   allTags,
   bringBack,
   complete,
+  describeDays,
+  doToday,
   editTodo,
   markReviewed,
+  nextScheduled,
   park,
   removeTodo,
   reopen,
   reviewDue,
+  routineFor,
   sections,
   setDue,
+  setRepeat,
+  undoToday,
 } from './todos.js'
 
 const DELETE_CONFIRM_MS = 3000
@@ -29,6 +38,7 @@ export function mountTodos(root, session) {
     review: null, // { ids, index } while stepping through parked todos
     showParked: false,
     showDone: false,
+    showLater: false,
     showSettings: false,
   }
 
@@ -116,6 +126,10 @@ export function mountTodos(root, session) {
     if (ui.filter && !tags.includes(ui.filter)) ui.filter = null
     const shown = (item) => !ui.filter || item.tags.includes(ui.filter)
     const { active, parked, done } = sections(model, ctx.today)
+    const routine = routineFor(model, ctx.today)
+    const routineToday = routine.today.filter(shown)
+    const routineLater = routine.later.filter(shown)
+    const hasRoutine = routineToday.length + routineLater.length > 0
     const reviewItem = currentReviewItem()
 
     const parts = [
@@ -124,7 +138,15 @@ export function mountTodos(root, session) {
         ? reviewCard(reviewItem, ctx)
         : !session.readOnly && reviewDue(model, ctx.today) && reviewBanner(parked.length),
       tags.length > 0 && chips(tags),
-      activeList(active.filter(shown), ctx),
+      hasRoutine && routineSection(routineToday, routineLater, ctx),
+      hasRoutine
+        ? h(
+            'section',
+            { class: 'todo-group', 'aria-label': 'To do' },
+            h('h2', { class: 'section-title' }, 'To do'),
+            activeList(active.filter(shown), ctx),
+          )
+        : activeList(active.filter(shown), ctx),
       parked.some(shown) &&
         group(
           'showParked',
@@ -237,6 +259,147 @@ export function mountTodos(root, session) {
     )
   }
 
+  // A textarea so long todos wrap on a phone; Enter finishes the edit instead of a new line.
+  function textField(item, ctx) {
+    return h('textarea', {
+      class: 'todo-text',
+      rows: 1,
+      value: label(item),
+      'aria-label': 'Todo',
+      enterkeyhint: 'done',
+      'data-focus': `text-${item.id}`,
+      // Saves as you type but doesn't re-sort, so the row stays put while you edit.
+      oninput: (event) => {
+        autosize(event.target)
+        if (editTodo(item, event.target.value, ctx.today)) session.save()
+      },
+      onkeydown: (event) => {
+        if (event.key !== 'Enter' || event.isComposing) return
+        event.preventDefault()
+        event.target.blur()
+      },
+    })
+  }
+
+  function routineSection(todayItems, laterItems, ctx) {
+    const doneCount = todayItems.filter((item) => item.done === ctx.today).length
+    return h(
+      'section',
+      { class: 'routine', 'aria-label': 'Routine' },
+      h(
+        'div',
+        { class: 'section-head' },
+        h('h2', { class: 'section-title' }, 'Routine'),
+        todayItems.length > 0 && h('span', { class: 'meta' }, `${doneCount} of ${todayItems.length} done today`),
+      ),
+      todayItems.length > 0
+        ? h(
+            'ul',
+            { class: 'todo-list' },
+            todayItems.map((item) => routineRow(item, ctx)),
+          )
+        : h('p', { class: 'empty' }, 'Nothing scheduled today.'),
+      laterItems.length > 0 &&
+        group(
+          'showLater',
+          `Not today (${laterItems.length})`,
+          null,
+          laterItems.map((item) => laterRow(item, ctx)),
+          laterItems.some((item) => item.id === ui.openActions),
+        ),
+    )
+  }
+
+  function routineRow(item, ctx) {
+    const doneToday = item.done === ctx.today
+    return h(
+      'li',
+      { class: `todo is-routine${doneToday ? ' is-done-today' : ''}` },
+      h('input', {
+        type: 'checkbox',
+        class: 'todo-check',
+        checked: doneToday,
+        'aria-label': `Done today: ${item.text}`,
+        onchange: (event) => {
+          if (event.target.checked) doToday(item, ctx.today)
+          else undoToday(item, ctx.today)
+          commit()
+        },
+      }),
+      h(
+        'div',
+        { class: 'todo-main' },
+        textField(item, ctx),
+        h(
+          'span',
+          { class: 'meta' },
+          describeDays(item.repeat),
+          item.streak > 0 && h('span', { class: 'streak' }, ` · 🔥 ${item.streak} in a row`),
+        ),
+      ),
+      moreButton(item),
+      ui.openActions === item.id && h('div', { class: 'todo-actions' }, repeatControls(item, ctx), deleteButton(item)),
+    )
+  }
+
+  function laterRow(item, ctx) {
+    const next = nextScheduled(ctx.today, item.repeat)
+    return h(
+      'li',
+      { class: 'todo is-later' },
+      h(
+        'div',
+        { class: 'todo-main' },
+        h('span', { class: 'todo-label' }, label(item)),
+        h('span', { class: 'meta' }, `${describeDays(item.repeat)} · next on ${DAY_NAMES[weekdayOf(next)]}`),
+      ),
+      moreButton(item),
+      ui.openActions === item.id && h('div', { class: 'todo-actions' }, repeatControls(item, ctx), deleteButton(item)),
+    )
+  }
+
+  function repeatControls(item, ctx) {
+    const days = item.repeat ?? []
+    const isCustom = Boolean(item.repeat) && days.length < 7
+    const choose = (next) => {
+      setRepeat(item, next, ctx.today)
+      commit()
+    }
+    const option = (text, pressed, onclick) =>
+      h('button', { type: 'button', class: 'segment', 'aria-pressed': String(pressed), onclick }, text)
+    return h(
+      'div',
+      { class: 'repeat-field' },
+      h('span', { class: 'field-label' }, 'Repeat'),
+      h(
+        'div',
+        { class: 'segmented', role: 'group', 'aria-label': 'Repeat' },
+        option('Never', !item.repeat, () => choose(null)),
+        option('Every day', days.length === 7, () => choose(EVERY_DAY)),
+        option('Choose days', isCustom, () => isCustom || choose([weekdayOf(ctx.today)])),
+      ),
+      isCustom &&
+        h(
+          'div',
+          { class: 'day-picker', role: 'group', 'aria-label': 'Repeat on' },
+          WEEK_ORDER.map((day) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'day',
+                'aria-pressed': String(days.includes(day)),
+                'aria-label': DAY_NAMES[day],
+                title: DAY_NAMES[day],
+                onclick: () => choose(days.includes(day) ? days.filter((other) => other !== day) : [...days, day]),
+              },
+              DAY_NAMES[day][0],
+            ),
+          ),
+        ),
+    )
+  }
+
   function activeRow(item, ctx) {
     const overdue = item.due && item.due < ctx.today
     return h(
@@ -254,25 +417,7 @@ export function mountTodos(root, session) {
       h(
         'div',
         { class: 'todo-main' },
-        // A textarea so long todos wrap on a phone; Enter finishes the edit instead of a new line.
-        h('textarea', {
-          class: 'todo-text',
-          rows: 1,
-          value: label(item),
-          'aria-label': 'Todo',
-          enterkeyhint: 'done',
-          'data-focus': `text-${item.id}`,
-          // Saves as you type but doesn't re-sort, so the row stays put while you edit.
-          oninput: (event) => {
-            autosize(event.target)
-            if (editTodo(item, event.target.value, ctx.today)) session.save()
-          },
-          onkeydown: (event) => {
-            if (event.key !== 'Enter' || event.isComposing) return
-            event.preventDefault()
-            event.target.blur()
-          },
-        }),
+        textField(item, ctx),
         item.due &&
           h(
             'span',
@@ -285,6 +430,7 @@ export function mountTodos(root, session) {
         h(
           'div',
           { class: 'todo-actions' },
+          repeatControls(item, ctx),
           h(
             'label',
             { class: 'inline-field' },
@@ -387,12 +533,12 @@ export function mountTodos(root, session) {
     )
   }
 
-  function group(flag, title, hint, rows) {
+  function group(flag, title, hint, rows, forceOpen = false) {
     return h(
       'details',
       {
         class: 'group',
-        open: ui[flag],
+        open: ui[flag] || forceOpen,
         ontoggle: (event) => {
           ui[flag] = event.target.open
         },

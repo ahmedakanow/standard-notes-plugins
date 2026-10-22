@@ -16,6 +16,7 @@ One note holds all your todos. Group them with `#tags` and use the filter button
 - **Stale todos get parked, never lost.** A todo you haven't touched for 14 days moves to **Parked**. Adding, editing or bringing back a todo resets its clock, and todos with a due date are never parked automatically. You can also park a todo yourself from its **⋯** menu.
 - **Weekly review:** when there are parked todos, a banner offers a quick review: *Bring back*, *Keep parked*, *Done* or *Delete* for each one. *Not now* asks again in a week.
 - **Done** todos are kept, with the date you finished them.
+- **Routine:** make a todo repeat from its **⋯** menu, either **every day** or on **chosen days** (say Mon, Wed, Fri). Repeating todos sit in a Routine group at the top and show up only on their days. Ticking one crosses it out for the rest of the day and it comes back the next scheduled day. Each one keeps a 🔥 streak of scheduled days done in a row, which resets if you miss one. They're never parked and don't fill up Done.
 - **Settings (⚙︎):** change the 14 days. The setting syncs through your Standard Notes account and applies to every Todos note.
 
 In the plain editor a Todos note looks like this:
@@ -23,6 +24,8 @@ In the plain editor a Todos note looks like this:
 ```markdown
 <!-- organizer: todos · reviewed 2026-10-20 -->
 
+- [ ] Work out (2026-10-01, every day, done 2026-10-21, streak 4) #health
+- [ ] Stretch (2026-10-01, every mon wed fri)
 - [ ] Renew passport (2026-10-01, due 2026-11-15) #admin
 - [ ] Call the plumber (2026-10-22) #home
 
@@ -33,7 +36,7 @@ In the plain editor a Todos note looks like this:
 - [x] Buy milk (2026-10-20, done 2026-10-21) #home
 ```
 
-The first date is when the todo was last touched. Only the text is required, so a quick `- [ ] buy bread` typed anywhere is a valid todo; Organizer dates it the next time it opens the note.
+The first date is when the todo was last touched. Only the text is required, so a quick `- [ ] buy bread` typed anywhere is a valid todo; Organizer dates it the next time it opens the note. For repeating todos, `every` takes `day`, `weekday` or day names, and the checkbox just shows whether it's done today: tick them in Organizer so the streak counts.
 
 ## Install it
 

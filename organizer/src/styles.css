@@ -452,6 +452,108 @@ h1 {
   text-decoration: line-through;
 }
 
+.section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.routine,
+.todo-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.streak {
+  color: var(--fg);
+  white-space: nowrap;
+}
+
+.is-done-today .todo-text {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.todo.is-later {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.is-later .todo-label {
+  color: var(--muted);
+}
+
+.repeat-field {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.field-label {
+  font-size: 0.875rem;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.segment {
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+}
+
+.segment:first-child {
+  border-left: 0;
+}
+
+.segment[aria-pressed='true'] {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+
+.day-picker {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.day {
+  width: 2rem;
+  height: 2rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.day[aria-pressed='true'] {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .todo-actions {
   grid-column: 1 / -1;
   display: flex;

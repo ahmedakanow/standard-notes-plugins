@@ -182,6 +182,8 @@ function demoText() {
   return [
     '<!-- organizer: todos -->',
     '',
+    `- [ ] Work out (${day(-30)}, every day, done ${day(-1)}, streak 6) #health`,
+    `- [ ] Stretch (${day(-30)}, every mon wed fri)`,
     `- [ ] Renew passport (${day(-20)}, due ${day(-2)}) #admin`,
     `- [ ] Book a dentist appointment (${day(-3)}, due ${day(5)}) #health`,
     `- [ ] Call the plumber about the leak (${day(0)}) #home`,
