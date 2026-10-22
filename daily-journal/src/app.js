@@ -1,9 +1,10 @@
-import { createHost } from './hosts.js'
+import { createHost } from '../../shared/host.js'
 import {
   MOODS,
   SECTIONS,
   countEntryWords,
   describeDate,
+  formatDateHeading,
   parseEntry,
   previewFor,
   promptForDate,
@@ -33,7 +34,24 @@ const els = {
   saveStatus: $('save-status'),
 }
 
-const host = createHost()
+const host = createHost({ name: 'daily-journal', demoText })
+
+function demoText() {
+  return [
+    `# ${formatDateHeading(toIsoDate(new Date()))}`,
+    'Mood: 🙂 Good',
+    '',
+    '## Grateful for',
+    'Morning coffee on the balcony',
+    'A friend who checked in out of the blue',
+    '',
+    "## Today's focus",
+    'Finish the first version of my journal plugin.',
+    '',
+    '## Journal',
+    'Slow start, but the afternoon was good. Got the editor talking to Standard Notes and saw my first entry save. Small thing, but it felt like a real milestone.',
+  ].join('\n')
+}
 
 const state = {
   note: null, // latest copy of the note from the host

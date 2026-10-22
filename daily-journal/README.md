@@ -38,19 +38,16 @@ Then create a note, open the editor menu and pick **Daily Journal**.
 
 ## Work on it locally
 
-```sh
-npm install
-npm start          # serves this folder at http://localhost:8001 with CORS on
-```
+From the repository root, `npm install` once, then `npm start` to serve the repo at `http://localhost:8001`.
 
-- Open <http://localhost:8001> to try it in **preview mode**, which runs outside Standard Notes and keeps one entry in this browser. Add `?demo` for a filled-in example or `?reset` to clear it.
-- To try local changes inside Standard Notes, install `http://localhost:8001/ext.local.json`. It shows up as **Daily Journal (local)** next to the published one. If the web app won't load a `localhost` plugin, use the desktop app.
+- Open <http://localhost:8001/daily-journal/> to try it in **preview mode**, which runs outside Standard Notes and keeps one entry in this browser. Add `?demo` for a filled-in example or `?reset` to clear it.
+- To try local changes inside Standard Notes, install `http://localhost:8001/daily-journal/ext.local.json`. It shows up as **Daily Journal (local)** next to the published one. If the web app won't load a `localhost` plugin, use the desktop app.
 
-`npm test` runs the unit tests for `src/journal.js`.
+`npm test` (from the root) runs the unit tests.
 
 ## Publish a change
 
-Push to `main` and GitHub Pages republishes within a minute or two. Bump `version` in both `ext.json` and `package.json` when you release changes. Never change `identifier` in `ext.json`, because Standard Notes uses it to link notes to this editor.
+Push to `main` and GitHub Pages republishes within a minute or two. Bump `version` in `ext.json` when you release changes. Never change `identifier`, because Standard Notes uses it to link notes to this editor.
 
 ## Files
 
@@ -58,6 +55,5 @@ Push to `main` and GitHub Pages republishes within a minute or two. Bump `versio
 | --- | --- |
 | `src/journal.js` | Pure logic: Markdown parse/serialize, dates, prompts, word count, preview. No DOM. |
 | `src/app.js` | The UI and save flow. |
-| `src/hosts.js` | Talks to Standard Notes through ComponentRelay, or to localStorage in preview mode. |
 | `src/styles.css` | Styles built on Standard Notes theme variables, so themes apply automatically. |
-| `vendor/component-relay.js` | `@standardnotes/component-relay`, copied in by `npm run vendor`. |
+| `../shared/host.js` | Talks to Standard Notes (shared by all plugins in this repo), or to localStorage in preview mode. |
