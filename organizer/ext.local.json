@@ -1,0 +1,9 @@
+{
+  "identifier": "dev.personal-plugins.organizer.local",
+  "name": "Organizer (local)",
+  "description": "Development copy served by npm start. Installs alongside the published Organizer.",
+  "content_type": "SN|Component",
+  "area": "editor-editor",
+  "version": "0.1.0",
+  "url": "http://localhost:8001/organizer/index.html"
+}

@@ -1,0 +1,185 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  addTodos,
+  allTags,
+  bringBack,
+  complete,
+  editTodo,
+  normalizeTodos,
+  parseTodos,
+  previewTodos,
+  reopen,
+  reviewDue,
+  sections,
+  serializeTodos,
+} from '../src/todos.js'
+
+const TODAY = '2026-10-22'
+
+const DOCUMENTED = [
+  '- [ ] Renew passport (2026-10-01, due 2026-11-15) #admin',
+  '- [ ] Call the plumber (2026-10-22) #home',
+  '',
+  '## Parked',
+  '- [ ] Learn Spanish (2026-08-01) #personal',
+  '',
+  '## Done',
+  '- [x] Buy milk (2026-10-20, done 2026-10-21) #home',
+].join('\n')
+
+const strip = (items) => items.map(({ id, ...rest }) => rest)
+const texts = (items) => items.map((item) => item.text)
+
+test('reads the documented format', () => {
+  const model = parseTodos(DOCUMENTED, { reviewed: '2026-10-20' })
+  assert.deepEqual(strip(model.items), [
+    { text: 'Renew passport', tags: ['admin'], status: 'active', touched: '2026-10-01', due: '2026-11-15', done: null },
+    { text: 'Call the plumber', tags: ['home'], status: 'active', touched: '2026-10-22', due: null, done: null },
+    { text: 'Learn Spanish', tags: ['personal'], status: 'parked', touched: '2026-08-01', due: null, done: null },
+    { text: 'Buy milk', tags: ['home'], status: 'done', touched: '2026-10-20', due: null, done: '2026-10-21' },
+  ])
+  assert.equal(model.reviewed, '2026-10-20')
+  assert.equal(model.other, '')
+})
+
+test('writes the documented format back exactly', () => {
+  const model = parseTodos(DOCUMENTED, { reviewed: '2026-10-20' })
+  assert.deepEqual(serializeTodos(model, TODAY), { body: DOCUMENTED, meta: { reviewed: '2026-10-20' } })
+})
+
+test('hand-typed todos are valid and get dated when first seen', () => {
+  const model = parseTodos('- [ ] buy bread\n- call mum\n* fix bike #home\n- [X] posted the letter', {})
+  assert.deepEqual(texts(model.items), ['buy bread', 'call mum', 'fix bike', 'posted the letter'])
+  assert.deepEqual(
+    model.items.map((item) => item.touched),
+    [null, null, null, null],
+  )
+  assert.equal(normalizeTodos(model, { today: TODAY }), true)
+  assert.ok(model.items.every((item) => item.touched === TODAY))
+  assert.equal(model.items[3].done, TODAY)
+  assert.equal(normalizeTodos(model, { today: TODAY }), false, 'normalizing twice changes nothing')
+})
+
+test('brackets and hashes that are part of the text stay in the text', () => {
+  const model = parseTodos(
+    ['- [ ] Call mum (re: birthday)', '- [ ] Pay Sam back (half of £40) (2026-10-01)', '- [ ] Fix issue #5'].join('\n'),
+  )
+  assert.deepEqual(texts(model.items), ['Call mum (re: birthday)', 'Pay Sam back (half of £40)', 'Fix issue #5'])
+  assert.equal(model.items[1].touched, '2026-10-01')
+  assert.deepEqual(model.items[2].tags, [])
+})
+
+test('text that is not a todo is kept, including sections it does not know', () => {
+  const body = ['Remember: bins go out on Tuesday', '- [ ] a (2026-10-22)', '', '## Shopping list', '- milk', '- eggs'].join(
+    '\n',
+  )
+  const model = parseTodos(body)
+  assert.deepEqual(texts(model.items), ['a'])
+  assert.equal(model.other, 'Remember: bins go out on Tuesday\n\n## Shopping list\n- milk\n- eggs')
+  const once = serializeTodos(model, TODAY).body
+  assert.equal(serializeTodos(parseTodos(once), TODAY).body, once, 'stable when re-read')
+})
+
+test('parks todos untouched for the stale period, but never ones with a due date', () => {
+  const model = parseTodos(
+    [
+      '- [ ] fourteen days (2026-10-08)',
+      '- [ ] thirteen days (2026-10-09)',
+      '- [ ] old but due (2026-01-01, due 2026-12-01)',
+      '- [ ] old and overdue (2026-01-01, due 2026-02-01)',
+    ].join('\n'),
+  )
+  assert.equal(normalizeTodos(model, { today: TODAY, staleDays: 14 }), true)
+  assert.deepEqual(
+    model.items.map((item) => item.status),
+    ['parked', 'active', 'active', 'active'],
+  )
+  model.items[1].status = 'active'
+  normalizeTodos(model, { today: TODAY, staleDays: 7 })
+  assert.equal(model.items[1].status, 'parked', 'a shorter setting parks sooner')
+})
+
+test('orders overdue, then by due date, then newest; parked and done newest first', () => {
+  const model = parseTodos(
+    [
+      '- [ ] no due, older (2026-10-01)',
+      '- [ ] due later (2026-10-10, due 2026-11-30)',
+      '- [ ] overdue (2026-10-10, due 2026-10-20)',
+      '- [ ] no due, newer (2026-10-21)',
+      '- [ ] due sooner (2026-10-10, due 2026-10-25)',
+      '- [ ] very overdue (2026-10-10, due 2026-10-01)',
+      '## Parked',
+      '- [ ] parked older (2026-08-01)',
+      '- [ ] parked newer (2026-09-01)',
+      '## Done',
+      '- [x] done older (2026-10-01, done 2026-10-02)',
+      '- [x] done newer (2026-10-01, done 2026-10-12)',
+    ].join('\n'),
+  )
+  const { active, parked, done } = sections(model, TODAY)
+  assert.deepEqual(texts(active), [
+    'very overdue',
+    'overdue',
+    'due sooner',
+    'due later',
+    'no due, newer',
+    'no due, older',
+  ])
+  assert.deepEqual(texts(parked), ['parked newer', 'parked older'])
+  assert.deepEqual(texts(done), ['done newer', 'done older'])
+})
+
+test('a review is due weekly while anything is parked', () => {
+  const withParked = (reviewed) => parseTodos('## Parked\n- [ ] x (2026-08-01)', { reviewed })
+  assert.equal(reviewDue(parseTodos('- [ ] x (2026-10-22)'), TODAY), false, 'nothing parked')
+  assert.equal(reviewDue(withParked(undefined), TODAY), true, 'never reviewed')
+  assert.equal(reviewDue(withParked('2026-10-16'), TODAY), false, 'six days ago')
+  assert.equal(reviewDue(withParked('2026-10-15'), TODAY), true, 'seven days ago')
+})
+
+test('adds one todo per pasted line, with tags and the chosen due date', () => {
+  const model = parseTodos('')
+  const added = addTodos(model, '- [ ] Book flights #travel\n2. Renew insurance\n\n   * Pack', {
+    today: TODAY,
+    due: '2026-11-01',
+  })
+  assert.deepEqual(strip(added), [
+    { text: 'Book flights', tags: ['travel'], status: 'active', touched: TODAY, due: '2026-11-01', done: null },
+    { text: 'Renew insurance', tags: [], status: 'active', touched: TODAY, due: '2026-11-01', done: null },
+    { text: 'Pack', tags: [], status: 'active', touched: TODAY, due: '2026-11-01', done: null },
+  ])
+  assert.deepEqual(allTags(model), ['travel'])
+  assert.deepEqual(addTodos(model, '  \n - ', { today: TODAY }), [], 'blank input adds nothing')
+})
+
+test('editing, finishing and bringing back update the dates', () => {
+  const model = parseTodos('- [ ] Call plumber (2026-10-01)\n## Parked\n- [ ] Learn Spanish (2026-08-01)')
+  const [call, spanish] = model.items
+
+  assert.equal(editTodo(call, 'Call the plumber #home', TODAY), true)
+  assert.deepEqual([call.text, call.tags, call.touched], ['Call the plumber', ['home'], TODAY])
+  assert.equal(editTodo(call, '   ', TODAY), false)
+  assert.equal(call.text, 'Call the plumber', 'empty edits are ignored')
+
+  complete(call, '2026-10-23')
+  assert.deepEqual([call.status, call.done], ['done', '2026-10-23'])
+  reopen(call, '2026-10-24')
+  assert.deepEqual([call.status, call.done, call.touched], ['active', null, '2026-10-24'])
+
+  bringBack(spanish, TODAY)
+  assert.deepEqual([spanish.status, spanish.touched], ['active', TODAY])
+})
+
+test('the note-list preview summarises the list', () => {
+  const model = parseTodos(
+    [
+      '- [ ] Renew passport (2026-10-01, due 2026-10-20)',
+      '- [ ] Call the plumber (2026-10-22)',
+      '## Parked',
+      '- [ ] Learn Spanish (2026-08-01)',
+    ].join('\n'),
+  )
+  assert.equal(previewTodos(model, TODAY), '2 to do · 1 overdue · 1 parked · Next: Renew passport')
+  assert.equal(previewTodos(parseTodos(''), TODAY), 'No todos yet')
+})

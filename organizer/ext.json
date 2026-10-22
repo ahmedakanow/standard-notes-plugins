@@ -1,0 +1,9 @@
+{
+  "identifier": "dev.personal-plugins.organizer",
+  "name": "Organizer",
+  "description": "Notes shaped for their purpose. Todos: stale todos get parked, never lost. People coming next.",
+  "content_type": "SN|Component",
+  "area": "editor-editor",
+  "version": "0.1.0",
+  "url": "https://ahmedakanow.github.io/standard-notes-plugins/organizer/index.html"
+}
