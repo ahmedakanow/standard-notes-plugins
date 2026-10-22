@@ -20,11 +20,24 @@ import {
   routineFor,
   sections,
   setDue,
+  setRating,
   setRepeat,
   undoToday,
 } from './todos.js'
 
 const DELETE_CONFIRM_MS = 3000
+
+// Filter buttons besides tags. Their ids start with '!', which a tag can't.
+const RATING_FILTERS = [
+  { id: '!priority', label: 'High priority', matches: (item) => item.priority === 'high' && item.status !== 'done' },
+  { id: '!value', label: 'High value', matches: (item) => item.value === 'high' && item.status !== 'done' },
+]
+
+function matchesFilter(item, filter) {
+  if (!filter) return true
+  const rating = RATING_FILTERS.find((candidate) => candidate.id === filter)
+  return rating ? rating.matches(item) : item.tags.includes(filter)
+}
 
 /**
  * Renders a Todos note into `root`. `session` gives the model, the current context
@@ -106,8 +119,12 @@ export function mountTodos(root, session) {
     if (session.readOnly) return
     const added = addTodos(session.model, addInput.value, { today: session.context().today, due: addDue.value || null })
     if (added.length === 0) return
-    // Adding while filtered files the new todo under that tag.
-    if (ui.filter) for (const item of added) if (item.tags.length === 0) item.tags.push(ui.filter)
+    // Adding while filtered files the new todo under that tag or rating.
+    for (const item of added) {
+      if (ui.filter === '!priority') item.priority ||= 'high'
+      else if (ui.filter === '!value') item.value ||= 'high'
+      else if (ui.filter && item.tags.length === 0) item.tags.push(ui.filter)
+    }
     addInput.value = ''
     addDue.value = ''
     autosize(addInput)
@@ -117,14 +134,20 @@ export function mountTodos(root, session) {
 
   const label = (item) => [item.text, ...item.tags.map((tag) => `#${tag}`)].join(' ')
 
+  const ratingBadges = (item) =>
+    ['priority', 'value']
+      .filter((key) => item[key])
+      .map((key) => h('span', { class: `badge badge-${key}-${item[key]}` }, `${item[key] === 'high' ? 'High' : 'Low'} ${key}`))
+
   function render() {
     if (!root.contains(body)) return // another note or template has replaced this view
     const focus = captureFocus(root)
     const ctx = session.context()
     const { model } = session
     const tags = allTags(model)
-    if (ui.filter && !tags.includes(ui.filter)) ui.filter = null
-    const shown = (item) => !ui.filter || item.tags.includes(ui.filter)
+    const ratings = RATING_FILTERS.filter((rating) => model.items.some(rating.matches))
+    if (ui.filter && ![...ratings.map((rating) => rating.id), ...tags].includes(ui.filter)) ui.filter = null
+    const shown = (item) => matchesFilter(item, ui.filter)
     const { active, parked, done } = sections(model, ctx.today)
     const routine = routineFor(model, ctx.today)
     const routineToday = routine.today.filter(shown)
@@ -137,7 +160,7 @@ export function mountTodos(root, session) {
       reviewItem
         ? reviewCard(reviewItem, ctx)
         : !session.readOnly && reviewDue(model, ctx.today) && reviewBanner(parked.length),
-      tags.length > 0 && chips(tags),
+      tags.length + ratings.length > 0 && chips(tags, ratings),
       hasRoutine && routineSection(routineToday, routineLater, ctx),
       hasRoutine
         ? h(
@@ -181,23 +204,63 @@ export function mountTodos(root, session) {
     restoreFocus(root, focus)
   }
 
-  function chips(tags) {
-    const chip = (tag) =>
+  function chips(tags, ratings) {
+    const chip = (filter, text) =>
       h(
         'button',
         {
           type: 'button',
           class: 'chip',
-          'aria-pressed': String(ui.filter === tag),
+          'aria-pressed': String(ui.filter === filter),
           'data-always': '',
           onclick: () => {
-            ui.filter = tag
+            ui.filter = filter
             render()
           },
         },
-        tag ? `#${tag}` : 'All',
+        text,
       )
-    return h('div', { class: 'chips', role: 'group', 'aria-label': 'Filter by tag' }, chip(null), tags.map(chip))
+    return h(
+      'div',
+      { class: 'chips', role: 'group', 'aria-label': 'Filter' },
+      chip(null, 'All'),
+      ratings.map((rating) => chip(rating.id, rating.label)),
+      tags.map((tag) => chip(tag, `#${tag}`)),
+    )
+  }
+
+  function ratingControls(item, ctx) {
+    const field = (key, title) =>
+      h(
+        'div',
+        { class: 'option-field' },
+        h('span', { class: 'field-label' }, title),
+        h(
+          'div',
+          { class: 'segmented', role: 'group', 'aria-label': title },
+          [
+            ['low', 'Low', `Low ${key}`],
+            [null, '–', `${title} not rated`],
+            ['high', 'High', `High ${key}`],
+          ].map(([level, text, ariaLabel]) =>
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'segment',
+                'aria-pressed': String(item[key] === level),
+                'aria-label': ariaLabel,
+                onclick: () => {
+                  setRating(item, key, level, ctx.today)
+                  commit()
+                },
+              },
+              text,
+            ),
+          ),
+        ),
+      )
+    return h('div', { class: 'option-row' }, field('priority', 'Priority'), field('value', 'Value'))
   }
 
   function activeList(items, ctx) {
@@ -418,11 +481,17 @@ export function mountTodos(root, session) {
         'div',
         { class: 'todo-main' },
         textField(item, ctx),
-        item.due &&
+        (item.due || item.priority || item.value) &&
           h(
-            'span',
-            { class: 'due' },
-            overdue ? `Overdue · ${shortDate(item.due, ctx.today)}` : `Due ${shortDate(item.due, ctx.today)}`,
+            'div',
+            { class: 'todo-meta' },
+            item.due &&
+              h(
+                'span',
+                { class: 'due' },
+                overdue ? `Overdue · ${shortDate(item.due, ctx.today)}` : `Due ${shortDate(item.due, ctx.today)}`,
+              ),
+            ratingBadges(item),
           ),
       ),
       moreButton(item),
@@ -431,6 +500,7 @@ export function mountTodos(root, session) {
           'div',
           { class: 'todo-actions' },
           repeatControls(item, ctx),
+          ratingControls(item, ctx),
           h(
             'label',
             { class: 'inline-field' },
@@ -471,7 +541,12 @@ export function mountTodos(root, session) {
         'div',
         { class: 'todo-main' },
         h('span', { class: 'todo-label' }, label(item)),
-        h('span', { class: 'meta' }, `Untouched since ${shortDate(item.touched, ctx.today)}`),
+        h(
+          'div',
+          { class: 'todo-meta' },
+          h('span', { class: 'meta' }, `Untouched since ${shortDate(item.touched, ctx.today)}`),
+          ratingBadges(item),
+        ),
       ),
       h(
         'button',
@@ -619,7 +694,12 @@ export function mountTodos(root, session) {
       { class: 'review', 'aria-label': 'Review parked todos' },
       h('p', { class: 'meta' }, `Still want this? ${index + 1} of ${ids.length}`),
       h('p', { class: 'review-text' }, label(item)),
-      h('p', { class: 'meta' }, `Untouched since ${shortDate(item.touched, ctx.today)}`),
+      h(
+        'div',
+        { class: 'todo-meta' },
+        h('span', { class: 'meta' }, `Untouched since ${shortDate(item.touched, ctx.today)}`),
+        ratingBadges(item),
+      ),
       h(
         'div',
         { class: 'button-row' },

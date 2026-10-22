@@ -19,6 +19,7 @@ import {
   sections,
   serializeTodos,
   setDue,
+  setRating,
   setRepeat,
   undoToday,
 } from '../src/todos.js'
@@ -41,7 +42,7 @@ const texts = (items) => items.map((item) => item.text)
 
 test('reads the documented format', () => {
   const model = parseTodos(DOCUMENTED, { reviewed: '2026-10-20' })
-  const plain = { repeat: null, streak: 0 }
+  const plain = { repeat: null, streak: 0, priority: null, value: null }
   assert.deepEqual(strip(model.items), [
     { text: 'Renew passport', tags: ['admin'], status: 'active', touched: '2026-10-01', due: '2026-11-15', done: null, ...plain },
     { text: 'Call the plumber', tags: ['home'], status: 'active', touched: '2026-10-22', due: null, done: null, ...plain },
@@ -153,7 +154,16 @@ test('adds one todo per pasted line, with tags and the chosen due date', () => {
     today: TODAY,
     due: '2026-11-01',
   })
-  const fresh = { status: 'active', touched: TODAY, due: '2026-11-01', done: null, repeat: null, streak: 0 }
+  const fresh = {
+    status: 'active',
+    touched: TODAY,
+    due: '2026-11-01',
+    done: null,
+    repeat: null,
+    streak: 0,
+    priority: null,
+    value: null,
+  }
   assert.deepEqual(strip(added), [
     { text: 'Book flights', tags: ['travel'], ...fresh },
     { text: 'Renew insurance', tags: [], ...fresh },
@@ -293,6 +303,64 @@ test('making a todo repeat, and stopping', () => {
   doToday(item, TODAY)
   setRepeat(item, [], TODAY)
   assert.deepEqual([item.repeat, item.done, item.streak, item.touched], [null, null, 0, TODAY])
+})
+
+test('priority and value are kept in the text', () => {
+  const text = [
+    '- [ ] Renew passport (2026-10-01, due 2026-11-15, priority high, value high) #admin',
+    '- [ ] Tidy the desk (2026-10-22, priority low, value low)',
+  ].join('\n')
+  const model = parseTodos(text)
+  assert.deepEqual(
+    model.items.map((item) => [item.text, item.priority, item.value]),
+    [
+      ['Renew passport', 'high', 'high'],
+      ['Tidy the desk', 'low', 'low'],
+    ],
+  )
+  assert.equal(serializeTodos(model, TODAY).body, text)
+  const unknown = parseTodos('- [ ] Fix the boiler (priority urgent)').items[0]
+  assert.deepEqual([unknown.text, unknown.priority], ['Fix the boiler (priority urgent)', null])
+})
+
+test('ratings order the list: overdue, high priority, due, the rest, low priority; high value first', () => {
+  const model = parseTodos(
+    [
+      '- [ ] low priority, due soon (2026-10-20, due 2026-10-23, priority low)',
+      '- [ ] plain (2026-10-21)',
+      '- [ ] plain, high value (2026-10-10, value high)',
+      '- [ ] due later (2026-10-20, due 2026-11-30)',
+      '- [ ] high priority (2026-10-20, priority high)',
+      '- [ ] high priority, due (2026-10-20, due 2026-12-01, priority high)',
+      '- [ ] high priority, high value (2026-10-10, priority high, value high)',
+      '- [ ] overdue, low value (2026-10-10, due 2026-10-01, value low)',
+      '- [ ] overdue (2026-10-10, due 2026-10-15)',
+      '- [ ] plain, low value (2026-10-22, value low)',
+    ].join('\n'),
+  )
+  assert.deepEqual(texts(sections(model, TODAY).active), [
+    'overdue',
+    'overdue, low value',
+    'high priority, high value',
+    'high priority, due',
+    'high priority',
+    'due later',
+    'plain, high value',
+    'plain',
+    'plain, low value',
+    'low priority, due soon',
+  ])
+})
+
+test('rating a todo counts as touching it; making it repeat clears the ratings', () => {
+  const [item] = parseTodos('- [ ] Plan the trip (2026-10-01)').items
+  setRating(item, 'priority', 'high', TODAY)
+  setRating(item, 'value', 'low', TODAY)
+  assert.deepEqual([item.priority, item.value, item.touched], ['high', 'low', TODAY])
+  setRating(item, 'value', null, TODAY)
+  assert.equal(item.value, null)
+  setRepeat(item, EVERY_DAY, TODAY)
+  assert.deepEqual([item.priority, item.value], [null, null])
 })
 
 test('the note-list preview summarises the list', () => {

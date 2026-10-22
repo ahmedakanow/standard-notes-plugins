@@ -10,6 +10,7 @@
   --accent-fg: var(--sn-stylekit-info-contrast-color, #ffffff);
   --danger: var(--sn-stylekit-danger-color, #cc2128);
   --danger-fg: var(--sn-stylekit-danger-contrast-color, #ffffff);
+  --success: var(--sn-stylekit-success-color, #2b9612);
   --placeholder: var(--sn-stylekit-input-placeholder-color, #9a9ea6);
   --font: var(
     --sn-stylekit-sans-serif-font,
@@ -433,9 +434,50 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.todo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
 .due {
   font-size: 0.8125rem;
   color: var(--muted);
+}
+
+.badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  white-space: nowrap;
+}
+
+.badge-priority-high {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.badge-value-high {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.option-row {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
+.option-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .is-overdue .due {

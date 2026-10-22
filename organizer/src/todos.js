@@ -1,7 +1,7 @@
 // Pure Todos logic: no DOM, so it can be tested in Node. A Todos note is plain Markdown:
 //
 //   - [ ] Work out (2026-10-01, every day, done 2026-10-21, streak 4) #health
-//   - [ ] Renew passport (2026-10-01, due 2026-11-15) #admin
+//   - [ ] Renew passport (2026-10-01, due 2026-11-15, priority high, value high) #admin
 //   - [ ] Call the plumber (2026-10-22) #home
 //
 //   ## Parked
@@ -12,6 +12,9 @@
 //
 // The first date is when the todo was last touched; the stale clock counts from it.
 // Only the text is required, so `- [ ] buy bread` typed on a phone is a valid todo.
+//
+// One-off todos can be rated high or low on priority (how soon) and value (how much it
+// matters); unrated is the default. Ratings change the order, not the parking rules.
 //
 // Repeating todos ("every day", "every mon wed fri") form the routine. They are never
 // parked and never move to Done: they keep the last day they were done and a streak of
@@ -105,6 +108,8 @@ function readDetail(part) {
   if (days) return ['repeat', days]
   const streak = /^streak\s+(\d+)$/i.exec(part)
   if (streak) return ['streak', Number(streak[1])]
+  const rating = /^(priority|value)\s+(high|low)$/i.exec(part)
+  if (rating) return [rating[1].toLowerCase(), rating[2].toLowerCase()]
   return null
 }
 
@@ -140,6 +145,8 @@ function parseItem(line, section) {
     done: details.done ?? null,
     repeat,
     streak: details.streak ?? 0,
+    priority: repeat ? null : (details.priority ?? null),
+    value: repeat ? null : (details.value ?? null),
   }
 }
 
@@ -176,6 +183,8 @@ function formatItem(item, today) {
     item.touched,
     item.repeat && `every ${formatDays(item.repeat)}`,
     !item.repeat && item.due && `due ${item.due}`,
+    item.priority && `priority ${item.priority}`,
+    item.value && `value ${item.value}`,
     (item.repeat || item.status === 'done') && item.done && `done ${item.done}`,
     item.repeat && item.streak > 0 && `streak ${item.streak}`,
   ].filter(Boolean)
@@ -234,20 +243,31 @@ export function normalizeTodos(model, { today, staleDays = DEFAULT_STALE_DAYS })
 }
 
 const newestFirst = (a, b) => (a === b ? 0 : (a ?? '') < (b ?? '') ? 1 : -1)
-const activeRank = (item, today) => (!item.due ? 2 : item.due < today ? 0 : 1)
+
+/** Overdue, then high priority, then due dated, then the rest, then low priority. */
+function activeRank(item, today) {
+  if (item.due && item.due < today) return 0
+  if (item.priority === 'high') return 1
+  if (item.priority === 'low') return 4
+  return item.due ? 2 : 3
+}
+
+const valueRank = (item) => (item.value === 'high' ? 0 : item.value === 'low' ? 2 : 1)
 
 function compareActive(today) {
   return (a, b) => {
-    const rank = activeRank(a, today) - activeRank(b, today)
+    const rank = activeRank(a, today) - activeRank(b, today) || valueRank(a) - valueRank(b)
     if (rank !== 0) return rank
     if (a.due && b.due) return a.due === b.due ? 0 : a.due < b.due ? -1 : 1
+    if (a.due || b.due) return a.due ? -1 : 1
     return newestFirst(a.touched, b.touched)
   }
 }
 
 /**
- * Routine (repeating todos, in the order they were written), then active todos (overdue
- * first, then by due date, then newest), parked and done (newest first).
+ * Routine (repeating todos, in the order they were written), then active todos (overdue,
+ * high priority, due dated, the rest, low priority; high value first within each, then by
+ * due date, then newest), parked and done (newest first).
  */
 export function sections(model, today) {
   const oneOff = (status) => model.items.filter((item) => !item.repeat && item.status === status)
@@ -321,12 +341,20 @@ export function setDue(item, due, today) {
   item.touched = today
 }
 
+/** Rates a todo's 'priority' or 'value' as 'high', 'low' or null (unrated). */
+export function setRating(item, key, level, today) {
+  item[key] = level
+  item.touched = today
+}
+
 /** Makes a todo repeat on `days` (weekday numbers), or stop repeating with null or []. */
 export function setRepeat(item, days, today) {
   if (days && days.length > 0) {
     item.repeat = [...new Set(days)].sort((a, b) => a - b)
     item.status = 'active'
     item.due = null
+    item.priority = null
+    item.value = null
     if (!item.repeat.includes(weekdayOf(today)) && item.done === today) item.done = null
   } else {
     item.repeat = null

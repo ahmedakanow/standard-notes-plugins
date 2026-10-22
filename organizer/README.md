@@ -12,7 +12,8 @@ Everything is stored as plain Markdown, so your notes still read well in the pla
 One note holds all your todos. Group them with `#tags` and use the filter buttons at the top.
 
 - **Add** with the box at the top. Add `#tag` to group a todo, pick an optional due date, or paste a list to add one todo per line.
-- **Order:** overdue first, then by due date, then newest first.
+- **Priority and value:** from a todo's **⋯** menu, rate its priority (how soon) and value (how much it matters) as High or Low. Both are optional. Once something is rated high, **High priority** and **High value** filter buttons appear next to your tags. Adding a todo while one of them is on rates it high.
+- **Order:** overdue first, then high priority, then by due date, then the rest, with low priority at the bottom. Within each group, high value comes first.
 - **Stale todos get parked, never lost.** A todo you haven't touched for 14 days moves to **Parked**. Adding, editing or bringing back a todo resets its clock, and todos with a due date are never parked automatically. You can also park a todo yourself from its **⋯** menu.
 - **Weekly review:** when there are parked todos, a banner offers a quick review: *Bring back*, *Keep parked*, *Done* or *Delete* for each one. *Not now* asks again in a week.
 - **Done** todos are kept, with the date you finished them.
@@ -26,7 +27,7 @@ In the plain editor a Todos note looks like this:
 
 - [ ] Work out (2026-10-01, every day, done 2026-10-21, streak 4) #health
 - [ ] Stretch (2026-10-01, every mon wed fri)
-- [ ] Renew passport (2026-10-01, due 2026-11-15) #admin
+- [ ] Renew passport (2026-10-01, due 2026-11-15, priority high, value high) #admin
 - [ ] Call the plumber (2026-10-22) #home
 
 ## Parked
