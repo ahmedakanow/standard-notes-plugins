@@ -11,8 +11,6 @@ import {
   toIsoDate,
 } from './journal.js'
 
-window.__djAppStarted = true // [DEBUG-sn7m]
-
 const WORD_GOAL_KEY = 'wordGoal'
 const DEFAULT_WORD_GOAL = 250
 
