@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Daily Journal</title>
+    <link rel="stylesheet" href="src/styles.css" />
+    <script src="vendor/component-relay.js"></script>
+    <script type="module" src="src/app.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <p class="preview-banner" id="preview-banner" hidden>
+        Preview mode: not connected to Standard Notes. Your entry is saved in this browser only.
+      </p>
+
+      <main class="journal" id="journal" hidden>
+        <header class="masthead">
+          <div>
+            <p class="weekday" id="weekday"></p>
+            <h1 class="date-line" id="date-line"></h1>
+          </div>
+          <div class="masthead-tools">
+            <span class="lock-badge" id="lock-badge" hidden>🔒 Locked</span>
+            <input class="date-input" id="date-input" type="date" aria-label="Entry date" />
+          </div>
+        </header>
+
+        <section class="mood" aria-labelledby="mood-label">
+          <h2 class="section-label" id="mood-label">How are you feeling?</h2>
+          <div class="mood-options" id="moods" role="group" aria-labelledby="mood-label"></div>
+        </section>
+
+        <div class="sections" id="sections"></div>
+      </main>
+
+      <footer class="statusbar" id="statusbar" hidden>
+        <div class="statusbar-inner">
+          <div
+            class="progress"
+            id="progress"
+            role="progressbar"
+            aria-label="Word goal progress"
+            aria-valuemin="0"
+            aria-valuemax="100"
+          >
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <span id="word-count"></span>
+          <label class="goal">
+            Goal
+            <input id="goal-input" type="number" min="0" step="50" inputmode="numeric" />
+          </label>
+          <span class="save-status" id="save-status" role="status"></span>
+        </div>
+      </footer>
+    </div>
+  </body>
+</html>

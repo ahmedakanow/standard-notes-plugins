@@ -1,0 +1,9 @@
+{
+  "identifier": "dev.personal-plugins.daily-journal",
+  "name": "Daily Journal",
+  "description": "A guided daily journal: mood, gratitude, focus, free writing and a prompt of the day.",
+  "content_type": "SN|Component",
+  "area": "editor-editor",
+  "version": "1.0.0",
+  "url": "https://ahmedakanow.github.io/standard-notes-plugins/daily-journal/index.html"
+}

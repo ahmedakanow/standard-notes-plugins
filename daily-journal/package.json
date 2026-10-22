@@ -1,0 +1,16 @@
+{
+  "name": "sn-daily-journal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Daily journal editor plugin for Standard Notes",
+  "type": "module",
+  "scripts": {
+    "start": "http-server . -p 8001 --cors -c-1",
+    "test": "node --test",
+    "vendor": "node -e \"require('fs').copyFileSync('node_modules/@standardnotes/component-relay/dist/dist.js', 'vendor/component-relay.js')\""
+  },
+  "devDependencies": {
+    "@standardnotes/component-relay": "2.2.2",
+    "http-server": "^14.1.1"
+  }
+}
