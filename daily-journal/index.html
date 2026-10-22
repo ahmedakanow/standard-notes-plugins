@@ -4,12 +4,86 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Daily Journal</title>
+    <script>
+      // [DEBUG-sn7m] Connection diagnostics for the blank-screen-on-mobile bug. Remove once fixed.
+      // Plain ES5 on purpose, so it still runs if the app's own scripts fail to load or parse.
+      ;(function () {
+        var BUILD = 'diag-1'
+        var started = Date.now()
+        var log = { messages: [], errors: [] }
+        window.__djDiag = log
+        function since() {
+          return '+' + ((Date.now() - started) / 1000).toFixed(1) + 's'
+        }
+        function describe(data) {
+          var parsed = data
+          if (typeof data === 'string') {
+            try {
+              parsed = JSON.parse(data)
+            } catch (e) {
+              return 'unparsed string, length ' + data.length
+            }
+          }
+          if (!parsed || typeof parsed !== 'object') return typeof parsed
+          // Only action names and key names: never note contents.
+          var keys = parsed.data && typeof parsed.data === 'object' ? Object.keys(parsed.data).join(',') : ''
+          return (parsed.action || '(no action)') + (keys ? ' data:{' + keys + '}' : '')
+        }
+        function onMessage(source) {
+          return function (event) {
+            log.messages.push(
+              since() + ' [' + source + '] origin=' + event.origin + ' ' + typeof event.data + ' ' + describe(event.data),
+            )
+          }
+        }
+        window.addEventListener('message', onMessage('window'))
+        document.addEventListener('message', onMessage('document'))
+        window.addEventListener(
+          'error',
+          function (event) {
+            var target = event.target
+            log.errors.push(
+              since() + ' ' + (event.message || 'failed to load ' + ((target && (target.src || target.href)) || 'resource')),
+            )
+          },
+          true,
+        )
+        window.addEventListener('unhandledrejection', function (event) {
+          log.errors.push(since() + ' unhandled rejection: ' + event.reason)
+        })
+        document.addEventListener('DOMContentLoaded', function () {
+          document.getElementById('loading').textContent += ' (' + BUILD + ')'
+        })
+        setTimeout(function () {
+          var journal = document.getElementById('journal')
+          if (!journal || !journal.hidden) return
+          var lines = [
+            'Daily Journal diagnostics (' + BUILD + ')',
+            'page: ' + location.href,
+            'referrer: ' + (document.referrer || '(none)'),
+            'in a frame: ' + (window.parent !== window),
+            'relay loaded: ' + typeof window.ComponentRelay,
+            'app started: ' + !!window.__djAppStarted,
+            'agent: ' + navigator.userAgent,
+            '',
+            'messages received: ' + log.messages.length,
+          ]
+            .concat(log.messages, ['', 'errors: ' + log.errors.length])
+            .concat(log.errors)
+          var pre = document.createElement('pre')
+          pre.className = 'diagnostics'
+          pre.textContent = lines.join('\n')
+          document.body.appendChild(pre)
+        }, 6000)
+      })()
+    </script>
     <link rel="stylesheet" href="src/styles.css" />
     <script src="vendor/component-relay.js"></script>
     <script type="module" src="src/app.js"></script>
   </head>
   <body>
     <div class="app">
+      <p class="loading" id="loading">Loading Daily Journal…</p>
       <p class="preview-banner" id="preview-banner" hidden>
         Preview mode: not connected to Standard Notes. Your entry is saved in this browser only.
       </p>

@@ -11,11 +11,14 @@ import {
   toIsoDate,
 } from './journal.js'
 
+window.__djAppStarted = true // [DEBUG-sn7m]
+
 const WORD_GOAL_KEY = 'wordGoal'
 const DEFAULT_WORD_GOAL = 250
 
 const $ = (id) => document.getElementById(id)
 const els = {
+  loading: $('loading'),
   previewBanner: $('preview-banner'),
   journal: $('journal'),
   statusbar: $('statusbar'),
@@ -92,6 +95,7 @@ function queueSave() {
 
 function render({ keepFocus }) {
   const focus = keepFocus ? captureFocus() : null
+  els.loading.hidden = true
   els.journal.hidden = false
   els.statusbar.hidden = false
   renderDate()
