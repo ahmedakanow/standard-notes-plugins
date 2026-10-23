@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fake Standard Notes Android host</title>
+    <style>
+      body { margin: 0; }
+      iframe { display: block; border: 0; width: 800px; height: 1200px; }
+    </style>
+  </head>
+  <body>
+    <!-- Sandboxed without allow-same-origin, so the host page has an opaque origin and the
+         plugin receives event.origin === "null", as captured on Android. -->
+    <iframe id="host" sandbox="allow-scripts allow-forms"></iframe>
+    <script>
+      const query = location.search ? `${location.search}&mobile` : '?mobile'
+      document.getElementById('host').src = `index.html${query}`
+    </script>
+  </body>
+</html>

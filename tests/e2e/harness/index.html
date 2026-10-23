@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fake Standard Notes host</title>
+    <style>
+      body { margin: 0; background: #888; }
+      iframe { display: block; border: 0; height: 1150px; background: white; }
+    </style>
+  </head>
+  <body>
+    <iframe id="plugin"></iframe>
+    <script>
+      // Minimal stand-in for the Standard Notes side of the ComponentRelay protocol.
+      // ?mobile mimics the Android app as captured: messages are JSON strings and the plugin
+      // sees no referrer. Load it through mobile.html so this page also has an opaque ("null") origin.
+      const params = new URLSearchParams(location.search)
+      const MOBILE = params.has('mobile')
+      const PLUGIN_ORIGIN = 'http://localhost:8101' // tests/e2e/support.mjs PLUGIN
+      const SESSION_KEY = 'session-1'
+      const frame = document.getElementById('plugin')
+      frame.style.width = `${params.get('w') || 760}px`
+      // Same sandbox Standard Notes gives third-party plugins (IframeFeatureView.tsx).
+      frame.sandbox =
+        'allow-scripts allow-top-navigation-by-user-activation allow-popups allow-modals allow-forms allow-downloads'
+      if (MOBILE) frame.referrerPolicy = 'no-referrer'
+      frame.src = `${PLUGIN_ORIGIN}/${params.get('plugin') || 'daily-journal'}/index.html`
+
+      const notes = {
+        a: {
+          uuid: 'note-a',
+          content_type: 'Note',
+          created_at: '2026-10-20T12:00:00.000Z',
+          content: { title: 'A', text: params.get('text') ?? '', appData: {} },
+        },
+        b: {
+          uuid: 'note-b',
+          content_type: 'Note',
+          created_at: '2026-10-21T12:00:00.000Z',
+          content: {
+            title: 'B',
+            text: '# October 21, 2026\nMood: 😄 Great\n\n## Journal\nNote B body\n\n## Dreams\nFlying again',
+            appData: {},
+          },
+        },
+      }
+
+      const harness = (window.harness = {
+        current: 'a',
+        saves: [],
+        componentData: undefined,
+        streamMessage: null,
+        notes,
+        // Like ComponentViewer: always '*' (the sandboxed plugin's origin is opaque), and JSON
+        // strings on mobile.
+        send: (message) =>
+          frame.contentWindow.postMessage(MOBILE && !params.has('objects') ? JSON.stringify(message) : message, '*'),
+        reply: (original, data) => harness.send({ action: 'reply', original, data }),
+        showNote(key) {
+          harness.current = key
+          harness.reply(harness.streamMessage, { item: structuredClone(notes[key]) })
+        },
+        pushItem: (item) => harness.reply(harness.streamMessage, { item }),
+      })
+
+      window.addEventListener('message', (event) => {
+        // Like ComponentManager: routed by data.sessionKey only, so string replies are ignored.
+        if (event.source !== frame.contentWindow) return
+        const message = event.data
+        if (message?.sessionKey !== SESSION_KEY) return
+        if (message.action === 'stream-context-item') {
+          harness.streamMessage = message
+          if (params.has('noreply')) return
+          harness.reply(message, { item: structuredClone(notes[harness.current]) })
+        } else if (message.action === 'save-items') {
+          for (const item of message.data.items) {
+            const key = Object.keys(notes).find((k) => notes[k].uuid === item.uuid)
+            notes[key] = structuredClone(item)
+          }
+          harness.saves.push(structuredClone(message.data.items))
+          harness.reply(message, {})
+        } else if (message.action === 'set-component-data') {
+          harness.componentData = message.data.componentData
+        }
+      })
+
+      frame.addEventListener('load', () => {
+        if (params.has('silent')) return
+        harness.send({
+          action: 'component-registered',
+          sessionKey: SESSION_KEY,
+          componentData: undefined,
+          data: {
+            uuid: 'component-1',
+            environment: MOBILE ? 'native-mobile-web' : 'web',
+            platform: MOBILE ? 'android' : 'windows',
+            activeThemeUrls: params.has('dark') ? [new URL('dark.css', location.href).href] : [],
+          },
+        })
+        if (MOBILE && !params.has('nothemes')) harness.send({ action: 'themes', data: { themes: [] } })
+      })
+    </script>
+  </body>
+</html>

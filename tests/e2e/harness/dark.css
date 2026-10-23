@@ -1,0 +1,13 @@
+:root {
+  --sn-stylekit-background-color: #1d1e22;
+  --sn-stylekit-foreground-color: #e4e5e9;
+  --sn-stylekit-editor-background-color: #1d1e22;
+  --sn-stylekit-editor-foreground-color: #e4e5e9;
+  --sn-stylekit-contrast-background-color: #27292e;
+  --sn-stylekit-border-color: #383a40;
+  --sn-stylekit-neutral-color: #9a9ea8;
+  --sn-stylekit-info-color: #5aa2ff;
+  --sn-stylekit-info-contrast-color: #0d1420;
+  --sn-stylekit-success-color: #4cc26a;
+  --sn-stylekit-input-placeholder-color: #6c7079;
+}

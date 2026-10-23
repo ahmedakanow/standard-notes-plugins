@@ -6,10 +6,13 @@
   "scripts": {
     "start": "http-server . -p 8001 --cors -c-1",
     "test": "node --test \"*/test/*.test.js\"",
+    "test:browser": "node tests/e2e/run.mjs",
+    "test:hosted": "node tests/e2e/hosted-check.mjs",
     "vendor": "node -e \"require('fs').copyFileSync('node_modules/@standardnotes/component-relay/dist/dist.js', 'shared/vendor/component-relay.js')\""
   },
   "devDependencies": {
     "@standardnotes/component-relay": "2.2.2",
-    "http-server": "^14.1.1"
+    "http-server": "^14.1.1",
+    "puppeteer-core": "^23.11.1"
   }
 }
