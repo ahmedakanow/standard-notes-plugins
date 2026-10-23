@@ -955,7 +955,7 @@ h1 {
   font-weight: 700;
 }
 
-/* Titles, the running head, the introduction */
+/* Titles and the running head */
 
 .nb-title {
   flex: 1;
@@ -1020,17 +1020,7 @@ h1 {
   margin-top: -1rem;
 }
 
-.nb-intro .md {
-  font-style: italic;
-  font-size: 1.1875rem;
-}
-
-.nb-add-intro {
-  align-self: flex-start;
-  margin-top: -1rem;
-}
-
-/* Thoughts and the Unsorted slips */
+/* Adding a thought on the front page */
 
 .nb-thought {
   display: flex;
@@ -1065,60 +1055,6 @@ h1 {
   align-self: flex-end;
   padding-bottom: 0.5rem;
   font-size: 0.875rem;
-}
-
-.nb-unsorted {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  margin-top: -0.75rem;
-  padding-left: 0.875rem;
-  border-left: 2px solid var(--rule);
-}
-
-.nb-label {
-  margin: 0;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.nb-count {
-  font-weight: 400;
-}
-
-.nb-slips {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.nb-slip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 0.75rem;
-}
-
-.nb-slip-open {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--serif);
-  font-size: 1.0625rem;
-  text-align: left;
-  color: var(--fg);
-  background: none;
-  border: 0;
-  padding: 0.25rem 0;
-  cursor: pointer;
-}
-
-.nb-slip-open:hover {
-  color: var(--accent);
-}
-
-.nb-slip .nb-move {
-  flex-basis: 100%;
 }
 
 /* The contents page: the memorable part */
@@ -1352,12 +1288,11 @@ h1 {
   background: var(--surface);
 }
 
-.nb-move .text-button,
-.nb-text > .text-button {
+.nb-move .text-button {
   align-self: flex-start;
 }
 
-/* Reading and editing a section: its entries, one after another */
+/* Reading and editing entries, one after another */
 
 .nb-entries {
   display: flex;
@@ -1409,12 +1344,6 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 1.5rem;
-}
-
-.nb-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 
 .nb-add,

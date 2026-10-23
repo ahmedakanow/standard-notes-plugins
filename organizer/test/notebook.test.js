@@ -4,15 +4,14 @@ import {
   MAX_DEPTH,
   addEntry,
   addSection,
-  addThought,
   countInside,
   deleteSection,
   entryTargets,
   entryToSection,
-  findUnsorted,
   height,
   locate,
   locateEntry,
+  mergeUnsorted,
   moveEntry,
   moveEntryByOne,
   moveSection,
@@ -36,6 +35,9 @@ const TODAY = '2026-10-23'
 
 const DOCUMENTED = [
   'Everything about sleeping better.',
+  '',
+  '<!-- entry 2026-10-22 -->',
+  'Ask Sam which sleep app he uses',
   '',
   '## Sleep',
   '<!-- edited 2026-10-20 -->',
@@ -68,9 +70,15 @@ function find(model, title) {
   return null
 }
 
-test('reads the documented format: intro, nested sections, entries and dates', () => {
+test("reads the documented format: the notebook's own entries, nested sections, entries and dates", () => {
   const model = parseNotebook(DOCUMENTED)
-  assert.equal(model.intro, 'Everything about sleeping better.')
+  assert.deepEqual(
+    model.entries.map((entry) => [entry.text, entry.added]),
+    [
+      ['Everything about sleeping better.', null],
+      ['Ask Sam which sleep app he uses', '2026-10-22'],
+    ],
+  )
   assert.deepEqual(titles(model.sections), ['Sleep', 'Exercise'])
   const sleep = model.sections[0]
   assert.equal(sleep.edited, '2026-10-20')
@@ -172,19 +180,58 @@ test('adding an entry: at the end, headings kept as bold lines, the section mark
   assert.match(serializeNotebook(model).body, /First\n\n<!-- entry 2026-10-23 -->\n\*\*Article about light\*\*/)
 })
 
-test('thoughts are entries at the top of Unsorted, which is created at the top', () => {
+test('thoughts are entries on the notebook itself, written before the first section', () => {
   const model = parseNotebook('## Sleep')
-  addThought(model, 'Try magnesium', TODAY)
-  addThought(model, 'Ask Sam about his app\nHe mentioned it on Friday', TODAY)
-  const unsorted = findUnsorted(model)
-  assert.equal(model.sections[0], unsorted)
-  assert.deepEqual(texts(unsorted), ['Ask Sam about his app\nHe mentioned it on Friday', 'Try magnesium'])
-  assert.equal(unsorted.edited, TODAY)
-  assert.equal(addThought(model, '  ', TODAY), null)
+  addEntry(model, null, 'Try magnesium', TODAY)
+  addEntry(model, null, 'Ask Sam about his app\nHe mentioned it on Friday', TODAY)
+  assert.deepEqual(texts(model), ['Try magnesium', 'Ask Sam about his app\nHe mentioned it on Friday'])
+  assert.equal(model.sections[0].edited, null, 'no section changed')
+  assert.equal(addEntry(model, null, '  ', TODAY), null)
+  const body = serializeNotebook(model).body
   assert.equal(
-    serializeNotebook(model).body,
-    `## Unsorted\n<!-- edited ${TODAY} -->\n<!-- entry ${TODAY} -->\nAsk Sam about his app\nHe mentioned it on Friday\n\n<!-- entry ${TODAY} -->\nTry magnesium\n\n## Sleep`,
+    body,
+    `<!-- entry ${TODAY} -->\nTry magnesium\n\n<!-- entry ${TODAY} -->\nAsk Sam about his app\nHe mentioned it on Friday\n\n## Sleep`,
   )
+  assert.deepEqual(texts(parseNotebook(body)), texts(model))
+})
+
+test('an Unsorted section from an older version moves onto the notebook itself, oldest first', () => {
+  const model = parseNotebook(
+    [
+      'About sleep.',
+      '',
+      '## Unsorted',
+      '<!-- edited 2026-10-22 -->',
+      '<!-- entry 2026-10-22 -->',
+      'Newer thought',
+      '',
+      '<!-- entry 2026-10-21 -->',
+      'Older thought',
+      '',
+      '### Thought saved as a section',
+      '<!-- edited 2026-10-20 -->',
+      'With some text',
+      '',
+      '### A thought that grew',
+      '<!-- edited 2026-10-19 -->',
+      '#### Its own section',
+      '',
+      '## Sleep',
+    ].join('\n'),
+  )
+  assert.equal(mergeUnsorted(model), true)
+  assert.deepEqual(
+    model.entries.map((entry) => [entry.text, entry.added]),
+    [
+      ['About sleep.', null],
+      ['Thought saved as a section\n\nWith some text', '2026-10-20'],
+      ['Older thought', '2026-10-21'],
+      ['Newer thought', '2026-10-22'],
+    ],
+  )
+  assert.deepEqual(titles(model.sections), ['Sleep', 'A thought that grew'], 'one with sections inside moves to the top level')
+  assert.deepEqual(titles(model.sections[1].children), ['Its own section'])
+  assert.equal(mergeUnsorted(model), false, 'nothing left to merge')
 })
 
 test('editing and removing entries update the section, renaming too', () => {
@@ -203,33 +250,44 @@ test('editing and removing entries update the section, renaming too', () => {
   assert.equal(renameSection(model, exercise.id, '   ', TODAY), false)
 })
 
-test('moving entries: up and down, and to another section (Unsorted gets them at the top)', () => {
-  const model = parseNotebook('## Unsorted\n<!-- entry -->\nloose\n\n## A\none\n<!-- entry -->\ntwo\n\n## B')
+test('moving entries: up and down, to another section, and to the notebook itself', () => {
+  const model = parseNotebook('loose\n\n## A\none\n<!-- entry -->\ntwo\n\n## B')
   const a = find(model, 'A')
   const [one, two] = a.entries
   assert.equal(moveEntryByOne(model, two.id, -1), true)
   assert.deepEqual(texts(a), ['two', 'one'])
   assert.equal(moveEntryByOne(model, two.id, -1), false)
   assert.deepEqual(
-    entryTargets(model, one.id).map((target) => target.title),
-    ['Unsorted', 'B'],
+    entryTargets(model, one.id).map((target) => [target.id, target.title]),
+    [
+      [null, null],
+      [find(model, 'B').id, 'B'],
+    ],
+    'the notebook itself comes first',
   )
   assert.equal(moveEntry(model, one.id, find(model, 'B').id, TODAY), true)
   assert.deepEqual([texts(a), texts(find(model, 'B'))], [['two'], ['one']])
   assert.equal(find(model, 'B').edited, TODAY)
-  moveEntry(model, two.id, findUnsorted(model).id, TODAY)
-  assert.deepEqual(texts(findUnsorted(model)), ['two', 'loose'])
-  assert.equal(locateEntry(model, two.id).section, findUnsorted(model))
+  assert.equal(moveEntry(model, two.id, null, TODAY), true)
+  assert.deepEqual(texts(model), ['loose', 'two'], 'at the end, like anywhere else')
+  assert.deepEqual(locateEntry(model, two.id), { section: null, entry: two, index: 1, depth: 0 })
+  assert.deepEqual(
+    entryTargets(model, two.id).map((target) => target.title),
+    ['A', 'B'],
+  )
+  assert.equal(moveEntryByOne(model, two.id, -1), true)
+  assert.deepEqual(texts(model), ['two', 'loose'])
 })
 
-test('an entry can become a section inside its own, or at the top level from Unsorted', () => {
-  const model = parseNotebook('## Unsorted\n<!-- entry 2026-10-01 -->\nRead about light\nThe article on mornings\n\n## Sleep\nNaps\nShort ones only')
+test('an entry can become a section inside its own, or at the top level from the notebook itself', () => {
+  const model = parseNotebook('<!-- entry 2026-10-01 -->\nRead about light\nThe article on mornings\n\n## Sleep\nNaps\nShort ones only')
   const sleep = find(model, 'Sleep')
   const naps = entryToSection(model, sleep.entries[0].id, TODAY)
   assert.deepEqual([naps.title, texts(naps), sleep.entries.length], ['Naps', ['Short ones only'], 0])
   assert.equal(sleep.children[0], naps)
-  const light = entryToSection(model, findUnsorted(model).entries[0].id, TODAY)
-  assert.deepEqual(titles(model.sections), ['Unsorted', 'Sleep', 'Read about light'])
+  const light = entryToSection(model, model.entries[0].id, TODAY)
+  assert.deepEqual(titles(model.sections), ['Sleep', 'Read about light'])
+  assert.deepEqual(model.entries, [])
   assert.equal(light.entries[0].added, '2026-10-01', 'keeps when it was written')
 })
 
@@ -239,8 +297,8 @@ test('ticking checklist items in an entry, skipping ones in code blocks', () => 
   toggleCheck(model, entry.id, 0, TODAY)
   toggleCheck(model, entry.id, 1, TODAY)
   assert.equal(entry.text, '```\n- [ ] not a real item\n```\n- [x] one\n- [ ] two')
-  toggleCheck(model, 'intro', 0, TODAY)
-  assert.equal(model.intro, 'Intro\n- [x] intro item')
+  toggleCheck(model, model.entries[0].id, 0, TODAY)
+  assert.equal(model.entries[0].text, 'Intro\n- [x] intro item')
 })
 
 test('moving sections: never into itself, and only where it fits within five levels', () => {
@@ -295,10 +353,17 @@ test('search: name matches first, with the path, a snippet and the matching entr
   assert.match(naps[0].snippet, /later thought about naps/)
   assert.deepEqual(searchNotebook(model, '   '), [])
   assert.equal(sectionText(find(model, 'Sleep')), 'Notes about sleep.\n\nA later thought about naps.')
+  const sam = searchNotebook(model, 'sam')
+  assert.deepEqual(
+    sam.map((result) => [result.id, result.title, result.path, result.entryId]),
+    [[null, null, [], model.entries[1].id]],
+    "the notebook's own entries are searched too",
+  )
 })
 
 test('the note-list preview counts sections and shows the latest edit', () => {
-  assert.equal(previewNotebook(parseNotebook(DOCUMENTED), TODAY), '4 sections · edited Oct 20')
+  assert.equal(previewNotebook(parseNotebook(DOCUMENTED), TODAY), '4 sections · edited Oct 22', 'a thought counts as an edit')
   assert.equal(previewNotebook(parseNotebook(''), TODAY), 'Empty notebook')
+  assert.equal(previewNotebook(parseNotebook('Just a thought'), TODAY), 'No sections yet')
   assert.equal(previewNotebook(parseNotebook('## Only'), TODAY), '1 section')
 })

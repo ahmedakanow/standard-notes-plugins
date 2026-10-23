@@ -6,12 +6,10 @@ import {
   MAX_DEPTH,
   addEntry,
   addSection,
-  addThought,
   countInside,
   deleteSection,
   entryTargets,
   entryToSection,
-  findUnsorted,
   locate,
   moveEntry,
   moveEntryByOne,
@@ -39,9 +37,9 @@ const WIDE = '(min-width: 760px)'
 export function mountNotebook(root, session) {
   const ui = {
     current: null, // id of the open section, or null for the top level
-    editing: null, // id of the entry open for editing, or 'intro'
+    editing: null, // id of the entry open for editing
     entryMenu: null, // id of the entry whose ⋯ menu is open
-    movingEntry: null, // id of the entry choosing where to move (or to file, from Unsorted)
+    movingEntry: null, // id of the entry choosing where to move
     confirmEntryDelete: null,
     addingEntry: null, // id of the section with its Add entry box open
     entryDraft: '',
@@ -50,7 +48,7 @@ export function mountNotebook(root, session) {
     highlight: '', // search term to mark in the section opened from a result
     arranging: false, // the contents list shows drag handles and menus instead of reading view
     menu: null, // id of the section whose ⋯ menu is open
-    moving: null, // id of the section choosing where to move (or to file, from Unsorted)
+    moving: null, // id of the section choosing where to move
     renaming: null,
     renameDraft: null,
     confirmDelete: null,
@@ -215,7 +213,7 @@ export function mountNotebook(root, session) {
                   open(result.id, { highlight: term, entryId: result.entryId })
                 },
               },
-              h('span', { class: 'nb-row-title' }, mark(result.title, ui.query)),
+              h('span', { class: 'nb-row-title' }, result.title === null ? rootTitle() : mark(result.title, ui.query)),
               result.path.length > 0 && h('span', { class: 'meta' }, result.path.join(' › ')),
               result.snippet && h('span', { class: 'nb-preview' }, mark(result.snippet, ui.query)),
             ),
@@ -315,6 +313,7 @@ export function mountNotebook(root, session) {
 
   const firstWords = (entry) => plainPreview(entry.text, 40) || 'this entry'
 
+  /** One entry, read or edited. `section` is null for the notebook's own entries, at depth 0. */
   function entryBlock(entry, index, section, depth, ctx) {
     const editing = ui.editing === entry.id
     return h(
@@ -351,22 +350,22 @@ export function mountNotebook(root, session) {
           ),
         ),
       ui.entryMenu === entry.id && entryMenu(entry, index, section, depth, ctx),
-      ui.movingEntry === entry.id && entryPicker(entry, section, ctx),
+      ui.movingEntry === entry.id && entryPicker(entry, ctx),
     )
   }
 
   function entryMenu(entry, index, section, depth, ctx) {
     const confirming = ui.confirmEntryDelete === entry.id
-    const inUnsorted = section === findUnsorted(session.model)
+    const count = (section ?? session.model).entries.length
     const button = (text, onclick, props = {}) => h('button', { type: 'button', class: 'button', onclick, ...props }, text)
     return h(
       'div',
       { class: 'button-row nb-menu' },
       button('Move up', () => moveEntryByOne(session.model, entry.id, -1) && commit(), { 'data-disabled': index === 0 }),
       button('Move down', () => moveEntryByOne(session.model, entry.id, 1) && commit(), {
-        'data-disabled': index === section.entries.length - 1,
+        'data-disabled': index === count - 1,
       }),
-      button(inUnsorted ? 'File…' : 'Move to…', () => {
+      button('Move to…', () => {
         ui.movingEntry = ui.movingEntry === entry.id ? null : entry.id
         render()
       }),
@@ -377,7 +376,7 @@ export function mountNotebook(root, session) {
           ui.entryMenu = null
           commit()
         },
-        { 'data-disabled': !inUnsorted && depth >= MAX_DEPTH },
+        { 'data-disabled': depth >= MAX_DEPTH },
       ),
       button(
         confirming ? 'Tap again to delete' : 'Delete',
@@ -402,10 +401,9 @@ export function mountNotebook(root, session) {
     )
   }
 
-  function entryPicker(entry, section, ctx) {
-    const filing = section === findUnsorted(session.model)
+  function entryPicker(entry, ctx) {
     return picker({
-      prompt: filing ? `File "${firstWords(entry)}" under:` : 'Move this entry to:',
+      prompt: 'Move this entry to:',
       empty: 'There is no other section yet. Add one first.',
       targets: entryTargets(session.model, entry.id),
       onPick: (target) => {
@@ -421,7 +419,7 @@ export function mountNotebook(root, session) {
     })
   }
 
-  /** A list of sections to choose from, indented by depth. */
+  /** A list of places to choose from, indented by depth. A null title is the notebook itself. */
   function picker({ prompt, empty, targets, onPick, onCancel }) {
     return h(
       'div',
@@ -442,7 +440,7 @@ export function mountNotebook(root, session) {
                 style: `padding-left: ${0.75 + target.depth}rem`,
                 onclick: () => onPick(target),
               },
-              target.id === null ? 'Top level' : target.title,
+              target.title ?? rootTitle(),
             ),
           ),
         ),
@@ -516,80 +514,21 @@ export function mountNotebook(root, session) {
     )
   }
 
+  /** The front page: the notebook's own entries, where thoughts are added, then the contents. */
   function topPage(ctx) {
     const { model } = session
-    const unsorted = findUnsorted(model)
-    const sections = model.sections.filter((section) => section !== unsorted)
     return h(
       'section',
       { class: 'nb-page', 'aria-label': rootTitle() },
       h('h1', { class: 'nb-title' }, rootTitle()),
-      model.intro || ui.editing === 'intro'
-        ? h('div', { class: 'nb-intro' }, textBlock('intro', model.intro, ctx))
-        : h(
-            'button',
-            { type: 'button', class: 'text-button nb-add-intro', onclick: () => startEditing('intro') },
-            'Add an introduction',
-          ),
-      thoughtBox(ctx),
-      unsorted && unsorted.entries.length + unsorted.children.length > 0 && unsortedBlock(unsorted, ctx),
-      contentsBlock(null, sections, true, ctx),
-    )
-  }
-
-  /** Loose thoughts, each with a File button that opens the move picker. */
-  /**
-   * Loose thoughts, each with a File button. Thoughts are entries; older ones written as
-   * small sections are listed too and file the same way.
-   */
-  function unsortedBlock(unsorted, ctx) {
-    const slip = (label, isOpen, toggle, picker) =>
-      h(
-        'li',
-        { class: 'nb-slip' },
-        h('button', { type: 'button', class: 'nb-slip-open', 'data-always': '', onclick: () => open(unsorted.id) }, label),
+      model.entries.length > 0 &&
         h(
-          'button',
-          { type: 'button', class: 'text-button', 'aria-expanded': String(isOpen), 'aria-label': `File ${label}`, onclick: toggle },
-          'File',
+          'div',
+          { class: 'nb-entries' },
+          model.entries.map((entry, index) => entryBlock(entry, index, null, 0, ctx)),
         ),
-        isOpen && picker,
-      )
-    return h(
-      'section',
-      { class: 'nb-unsorted', 'aria-label': 'Unsorted' },
-      h(
-        'h2',
-        { class: 'nb-label' },
-        'Unsorted ',
-        h('span', { class: 'nb-count' }, String(unsorted.entries.length + unsorted.children.length)),
-      ),
-      h(
-        'ul',
-        { class: 'nb-slips' },
-        unsorted.entries.map((entry) =>
-          slip(
-            firstWords(entry),
-            ui.movingEntry === entry.id,
-            () => {
-              ui.movingEntry = ui.movingEntry === entry.id ? null : entry.id
-              render()
-            },
-            entryPicker(entry, unsorted, ctx),
-          ),
-        ),
-        unsorted.children.map((thought) =>
-          slip(
-            thought.title,
-            ui.moving === thought.id,
-            () => {
-              ui.moving = ui.moving === thought.id ? null : thought.id
-              render()
-            },
-            movePicker(thought),
-          ),
-        ),
-      ),
+      thoughtBox(ctx),
+      contentsBlock(null, model.sections, true, ctx),
     )
   }
 
@@ -686,33 +625,17 @@ export function mountNotebook(root, session) {
     render()
   }
 
-  function textBlock(key, text, ctx) {
-    if (ui.editing === key) return editor(key, text, ctx)
-    return h(
-      'div',
-      { class: 'nb-text' },
-      text &&
-        h(
-          'div',
-          { class: 'md' },
-          renderMarkdown(text).map((node) => toDom(node, key)),
-        ),
-      h('button', { type: 'button', class: 'text-button', onclick: () => startEditing(key) }, text ? 'Edit' : 'Add text'),
-    )
-  }
-
-  /** Edits the introduction ('intro') or an entry (its id). */
+  /** Edits an entry, `key` being its id. */
   function editor(key, text, ctx) {
     const update = (value) => {
-      if (key === 'intro') session.model.intro = value
-      else setEntryText(session.model, key, value, ctx.today)
+      setEntryText(session.model, key, value, ctx.today)
       saveSoon()
     }
     const textarea = h('textarea', {
       class: 'nb-editor',
       rows: 6,
       value: text,
-      'aria-label': key === 'intro' ? 'Introduction' : 'Entry text',
+      'aria-label': 'Entry text',
       'data-focus': `edit-${key}`,
       oninput: (event) => {
         autosize(event.target)
@@ -762,7 +685,7 @@ export function mountNotebook(root, session) {
             class: 'button primary',
             onclick: () => {
               // An entry emptied completely is removed rather than kept blank.
-              if (key !== 'intro' && !textarea.value.trim()) removeEntry(session.model, key, ctx.today)
+              if (!textarea.value.trim()) removeEntry(session.model, key, ctx.today)
               ui.editing = null
               commit()
             },
@@ -866,9 +789,8 @@ export function mountNotebook(root, session) {
   }
 
   function movePicker(section) {
-    const filing = locate(session.model, section.id)?.parent === findUnsorted(session.model)
     return picker({
-      prompt: filing ? `File "${section.title}" under:` : `Move "${section.title}" into:`,
+      prompt: `Move "${section.title}" into:`,
       empty: 'There is nowhere else this section fits.',
       targets: moveTargets(session.model, section.id),
       onPick: (target) => {
@@ -971,9 +893,10 @@ export function mountNotebook(root, session) {
     )
   }
 
+  /** A one-line box for adding an entry to the notebook itself. */
   function thoughtBox(ctx) {
     const add = () => {
-      if (!addThought(session.model, ui.thought, ctx.today)) return
+      if (!addEntry(session.model, null, ui.thought, ctx.today)) return
       ui.thought = ''
       commit()
     }
@@ -984,7 +907,7 @@ export function mountNotebook(root, session) {
         class: 'add-input',
         rows: 1,
         placeholder: 'Add a thought…',
-        'aria-label': 'Add a thought to Unsorted',
+        'aria-label': 'Add a thought',
         enterkeyhint: 'done',
         value: ui.thought,
         'data-focus': 'thought',

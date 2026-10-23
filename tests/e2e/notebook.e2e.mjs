@@ -52,11 +52,11 @@ const clickButton = (frame, label) =>
     if (!button) throw new Error(`no button "${label}"`)
     button.click()
   }, label)
-// Opens a section from the contents page, an Arrange-mode row or an Unsorted slip.
+// Opens a section from the contents page or an Arrange-mode row.
 const openRow = (frame, title) =>
   frame.evaluate((title) => {
-    const entry = [...document.querySelectorAll('.toc-entry, .nb-open, .nb-slip-open')].find(
-      (button) => (button.querySelector('.toc-title, .nb-row-title') ?? button).textContent === title,
+    const entry = [...document.querySelectorAll('.toc-entry, .nb-open')].find(
+      (button) => button.querySelector('.toc-title, .nb-row-title').textContent === title,
     )
     if (!entry) throw new Error(`no section "${title}" to open`)
     entry.click()
@@ -79,7 +79,9 @@ const contents = (frame) =>
   )
 const subContents = (frame) =>
   frame.$$eval('.nb-page .nb-contents .level-2 > .toc-entry .toc-title', (els) => els.map((el) => el.textContent))
-const slips = (frame) => frame.$$eval('.nb-unsorted .nb-slip-open', (els) => els.map((el) => el.textContent))
+const entryMenu = (frame, words) => frame.click(`[aria-label="More actions for \\"${words}\\""]`)
+const entryTexts = (frame) => frame.$$eval('.nb-entry .md', (els) => els.map((el) => el.textContent.trim()))
+const moveTargets = (frame) => frame.$$eval('.nb-move-target', (els) => els.map((el) => el.textContent))
 
 const PASTED = ['Sleep', 'I sleep badly.', '', '# Tips', '- No coffee after 2pm', '- [ ] Buy blackout curtains'].join('\n')
 
@@ -94,13 +96,13 @@ await check('choosing Notebook writes the marker and shows the empty notebook', 
   assert.match(await text(frame, '.nb-contents .empty'), /No sections yet/)
 })
 
-await check('a thought goes into Unsorted, which appears at the top', async () => {
+await check('a thought becomes an entry on the front page', async () => {
   await frame.click('[data-focus="thought"]')
   await page.keyboard.type('Try magnesium')
   await page.keyboard.press('Enter')
   await wait(900)
-  assert.equal(await saved(), `${MARKER}\n\n## Unsorted\n${EDITED}\n<!-- entry ${TODAY} -->\nTry magnesium`)
-  assert.deepEqual(await slips(frame), ['Try magnesium'])
+  assert.equal(await saved(), `${MARKER}\n\n<!-- entry ${TODAY} -->\nTry magnesium`)
+  assert.deepEqual(await entryTexts(frame), ['Try magnesium'])
 })
 
 await check('pasting a note makes a section, and its headings become sections inside it', async () => {
@@ -199,14 +201,15 @@ await check('renaming and moving from the menu', async () => {
   assert.deepEqual(await frame.$$eval('.nb-crumbs .crumb', (els) => els.map((el) => el.textContent)), ['A'])
 })
 
-await check('filing a thought from Unsorted', async () => {
+await check('moving a thought from the front page into a section', async () => {
   await clickButton(frame, 'A')
-  await frame.click('[aria-label="File Try magnesium"]')
-  assert.match(await text(frame, '.nb-move .meta'), /^File "Try magnesium" under:$/)
+  await entryMenu(frame, 'Try magnesium')
+  await clickButton(frame, 'Move to…')
+  assert.deepEqual(await moveTargets(frame), ['Sleep', 'Sleep tips'])
   await frame.evaluate(() => [...document.querySelectorAll('.nb-move-target')].find((b) => b.textContent === 'Sleep').click())
   await wait(900)
   assert.match(await saved(), /## Sleep\n<!-- edited .* -->\n<!-- entry .* -->\nI sleep badly\.\n\n<!-- entry .* -->\nTry magnesium/)
-  assert.equal(await frame.$('.nb-unsorted'), null, 'Unsorted is empty, so it hides')
+  assert.deepEqual(await entryTexts(frame), [])
 })
 
 await check('deleting (in Arrange) takes two taps', async () => {
@@ -256,9 +259,6 @@ await check('switching notes while typing saves the typing to the right note fir
 })
 
 // Entries: several unnamed pieces of text in one section
-const entryMenu = (frame, words) => frame.click(`[aria-label="More actions for \\"${words}\\""]`)
-const entryTexts = (frame) => frame.$$eval('.nb-entry .md', (els) => els.map((el) => el.textContent.trim()))
-
 frame = await open(`${MARKER}\n\n## Sleep\nFirst thought\n\n## Exercise`)
 await check('adding an entry puts it after the others, and the contents count them', async () => {
   await openRow(frame, 'Sleep')
@@ -285,6 +285,7 @@ await check('moving an entry up keeps the entries apart in the text', async () =
 await check('moving an entry to another section', async () => {
   await entryMenu(frame, 'First thought')
   await clickButton(frame, 'Move to…')
+  assert.deepEqual(await moveTargets(frame), ['A', 'Exercise'], 'the front page, named after the note, comes first')
   await frame.evaluate(() => [...document.querySelectorAll('.nb-move-target')].find((b) => b.textContent === 'Exercise').click())
   await wait(900)
   assert.deepEqual(await entryTexts(frame), ['Second thought'])
@@ -318,13 +319,50 @@ await check('emptying an entry removes it, and deleting one takes two taps', asy
   assert.match(await saved(), /## Exercise\n<!-- edited .* -->$/)
 })
 
+// Notes from 0.8.0 and before kept thoughts in an Unsorted section.
+frame = await open(
+  [
+    MARKER,
+    'About sleep.',
+    '',
+    '## Unsorted',
+    '<!-- edited 2026-10-22 -->',
+    '<!-- entry 2026-10-22 -->',
+    'Newer thought',
+    '',
+    '<!-- entry 2026-10-21 -->',
+    'Older thought',
+    '',
+    '### Oldest thought',
+    '<!-- edited 2026-10-20 -->',
+    '',
+    '## Sleep',
+  ].join('\n'),
+)
+await check('an Unsorted from an older version moves onto the front page, oldest first', async () => {
+  await wait(900)
+  assert.equal(
+    await saved(),
+    `${MARKER}\n\nAbout sleep.\n\n<!-- entry 2026-10-20 -->\nOldest thought\n\n<!-- entry 2026-10-21 -->\nOlder thought\n\n<!-- entry 2026-10-22 -->\nNewer thought\n\n## Sleep`,
+  )
+  assert.deepEqual(await entryTexts(frame), ['About sleep.', 'Oldest thought', 'Older thought', 'Newer thought'])
+  assert.deepEqual(await contents(frame), ['Sleep'])
+})
+
+await check('a front-page entry can become a top-level section', async () => {
+  await entryMenu(frame, 'Oldest thought')
+  await clickButton(frame, 'Make it a section')
+  await wait(900)
+  assert.deepEqual(await contents(frame), ['Sleep', 'Oldest thought'])
+  assert.match(await saved(), /About sleep\.\n\n<!-- entry 2026-10-21 -->\nOlder thought[\s\S]*## Oldest thought\n<!-- edited .* -->$/)
+})
+
 const DEMO = [
   MARKER,
   'Everything about sleeping better, in one place.',
   '',
-  '## Unsorted',
-  '### Ask Sam which sleep app he uses',
-  EDITED,
+  `<!-- entry ${TODAY} -->`,
+  'Ask Sam which sleep app he uses',
   '',
   '## Routine',
   EDITED,
@@ -361,7 +399,7 @@ await check('wide screens show the tree beside the page', async () => {
   assert.equal(await text(frame, '.nb-page .nb-title'), 'Routine')
   assert.deepEqual(
     await frame.$$eval('.nb-tree-link', (els) => els.map((el) => el.textContent)),
-    ['Unsorted', 'Routine', 'Evening', 'Morning', 'What the doctor said'],
+    ['Routine', 'Evening', 'Morning', 'What the doctor said'],
     'the open section expands in the tree',
   )
   await openRow(frame, 'Evening')
@@ -413,8 +451,8 @@ await check('Android replay: reads and saves through an opaque-origin host', asy
   const sandboxedHost = page.frames().find((candidate) => candidate.url().startsWith(`${HOST}/index.html`))
   assert.match(
     await sandboxedHost.evaluate(() => harness.notes.a.content.text),
-    /## Unsorted\n<!-- edited .* -->\n<!-- entry .* -->\nThought from my phone\n\n### Ask Sam which sleep app he uses/,
-    'the thought is an entry, and the older thought-section stays',
+    /Ask Sam which sleep app he uses\n\n<!-- entry .* -->\nThought from my phone\n\n## Routine/,
+    'the thought goes after the front page entries, before the sections',
   )
 })
 

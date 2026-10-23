@@ -1,8 +1,12 @@
 // Pure Notebook logic: no DOM, so it can be tested in Node. A Notebook note is one topic
-// as a tree of sections, written as Markdown headings. Each section holds entries: unnamed
-// pieces of text, each starting with a hidden line that records when it was added.
+// as a tree of sections, written as Markdown headings. The notebook itself and each section
+// hold entries: unnamed pieces of text, each starting with a hidden line that records when
+// it was added.
 //
-//   Anything before the first heading is the topic's introduction.
+//   Anything before the first heading is the notebook's own entries.
+//
+//   <!-- entry 2026-10-23 -->
+//   A thought added on the front page.
 //
 //   ## Sleep
 //   <!-- edited 2026-10-23 -->
@@ -85,7 +89,7 @@ function entriesFrom(lines) {
 }
 
 export function parseNotebook(body) {
-  const intro = []
+  const front = [] // lines before the first heading
   const sections = []
   const stack = [] // stack[n] is the open section at depth n + 1
   const lines = new Map()
@@ -117,10 +121,10 @@ export function parseNotebook(body) {
     }
     const text = inFence ? line : line.replace(/^\\(?=#{2,6}[ \t])/, '') // see escapeHeadings
     if (current) lines.get(current).push(text)
-    else intro.push(text)
+    else front.push(text)
   }
   for (const [section, sectionLines] of lines) section.entries = entriesFrom(sectionLines)
-  return { intro: tidy(intro.join('\n')), sections }
+  return { entries: entriesFrom(front), sections }
 }
 
 /** Escapes lines in a section's text that would otherwise be read back as headings. */
@@ -135,19 +139,25 @@ function escapeHeadings(text) {
     .join('\n')
 }
 
+function entryLines(entries) {
+  const lines = []
+  entries.forEach((entry, index) => {
+    // The first entry can go without a marker; after that, one is needed to keep them apart.
+    if (entry.added) lines.push(`<!-- entry ${entry.added} -->`)
+    else if (index > 0) lines.push('<!-- entry -->')
+    lines.push(escapeHeadings(entry.text))
+    if (index < entries.length - 1) lines.push('')
+  })
+  return lines
+}
+
 export function serializeNotebook(model) {
   const blocks = []
-  if (model.intro) blocks.push(escapeHeadings(model.intro))
+  if (model.entries.length > 0) blocks.push(entryLines(model.entries).join('\n'))
   const write = (section, depth) => {
     const lines = [`${'#'.repeat(depth + 1)} ${section.title}`]
     if (section.edited) lines.push(`<!-- edited ${section.edited} -->`)
-    section.entries.forEach((entry, index) => {
-      // The first entry can go without a marker; after that, one is needed to keep them apart.
-      if (entry.added) lines.push(`<!-- entry ${entry.added} -->`)
-      else if (index > 0) lines.push('<!-- entry -->')
-      lines.push(escapeHeadings(entry.text))
-      if (index < section.entries.length - 1) lines.push('')
-    })
+    lines.push(...entryLines(section.entries))
     blocks.push(lines.join('\n'))
     for (const child of section.children) write(child, depth + 1)
   }
@@ -169,14 +179,26 @@ export function walk(model) {
 
 export const locate = (model, id) => walk(model).find((entry) => entry.section.id === id) ?? null
 
-/** The section an entry is in, and where: { section, entry, index, depth }. */
+/** The entries of a section, or of the notebook itself for null. */
+const entriesOf = (model, section) => (section ? section.entries : model.entries)
+
+/** Marks a section edited. The notebook itself has no date of its own. */
+function touch(section, today) {
+  if (section) section.edited = today
+}
+
+/** Where an entry is: { section (null on the notebook itself), entry, index, depth }. */
 export function locateEntry(model, id) {
-  for (const { section, depth } of walk(model)) {
-    const index = section.entries.findIndex((entry) => entry.id === id)
-    if (index !== -1) return { section, entry: section.entries[index], index, depth }
+  for (const { section, depth } of [{ section: null, depth: 0 }, ...walk(model)]) {
+    const entries = entriesOf(model, section)
+    const index = entries.findIndex((entry) => entry.id === id)
+    if (index !== -1) return { section, entry: entries[index], index, depth }
   }
   return null
 }
+
+/** Where an entry can go by id: a section, or the notebook itself for null. */
+const holder = (model, sectionId) => (sectionId === null ? { section: null } : locate(model, sectionId))
 
 /** The sections from the top level down to `id`, inclusive. */
 export function pathTo(model, id) {
@@ -194,9 +216,6 @@ export const height = (section) => 1 + Math.max(0, ...section.children.map(heigh
 
 /** How many sections are inside, at any depth. */
 export const countInside = (section) => section.children.reduce((total, child) => total + 1 + countInside(child), 0)
-
-export const findUnsorted = (model) =>
-  model.sections.find((section) => section.title.toLowerCase() === UNSORTED.toLowerCase()) ?? null
 
 /** All of a section's text, for search and previews. */
 export const sectionText = (section) => section.entries.map((entry) => entry.text).join('\n\n')
@@ -276,30 +295,37 @@ export function addSection(model, parentId, input, today) {
   return section
 }
 
-/** Adds an entry at the end of a section. */
+/** Adds an entry at the end of a section, or of the notebook itself with null. */
 export function addEntry(model, sectionId, input, today) {
-  const target = locate(model, sectionId)
+  const target = holder(model, sectionId)
   const text = entryText(input)
   if (!target || !text) return null
   const entry = createEntry(text, today)
-  target.section.entries.push(entry)
-  target.section.edited = today
+  entriesOf(model, target.section).push(entry)
+  touch(target.section, today)
   return entry
 }
 
-/** Adds a quick thought as an entry at the top of Unsorted, creating it if needed. */
-export function addThought(model, input, today) {
-  const text = entryText(input)
-  if (!text) return null
-  let unsorted = findUnsorted(model)
-  if (!unsorted) {
-    unsorted = createSection(UNSORTED)
-    model.sections.unshift(unsorted)
+/**
+ * Quick thoughts used to go into an Unsorted section; now they're the notebook's own
+ * entries. Moves everything in Unsorted there, oldest first, and removes it. Thoughts
+ * saved as small sections become entries, unless they have sections inside, which move
+ * to the top level instead. Returns whether there was an Unsorted.
+ */
+export function mergeUnsorted(model) {
+  const index = model.sections.findIndex((section) => section.title.toLowerCase() === UNSORTED.toLowerCase())
+  if (index === -1) return false
+  const [unsorted] = model.sections.splice(index, 1)
+  const thoughts = []
+  // Unsorted kept the newest at the top.
+  for (const child of [...unsorted.children].reverse()) {
+    if (child.children.length > 0) model.sections.push(child)
+    else thoughts.push(createEntry([child.title, sectionText(child)].filter(Boolean).join('\n\n'), child.edited))
   }
-  const thought = createEntry(text, today)
-  unsorted.entries.unshift(thought)
-  unsorted.edited = today
-  return thought
+  thoughts.push(...[...unsorted.entries].reverse())
+  thoughts.sort((a, b) => (a.added ?? '').localeCompare(b.added ?? ''))
+  model.entries.push(...thoughts)
+  return true
 }
 
 export function renameSection(model, id, title, today) {
@@ -317,74 +343,69 @@ export function setEntryText(model, id, text, today) {
   const found = locateEntry(model, id)
   if (!found || found.entry.text === text) return
   found.entry.text = text
-  found.section.edited = today
+  touch(found.section, today)
 }
 
 export function removeEntry(model, id, today) {
   const found = locateEntry(model, id)
   if (!found) return
-  found.section.entries.splice(found.index, 1)
-  found.section.edited = today
+  entriesOf(model, found.section).splice(found.index, 1)
+  touch(found.section, today)
 }
 
-/** Moves an entry one place up (-1) or down (1) in its section. Returns false at either end. */
+/** Moves an entry one place up (-1) or down (1) where it is. Returns false at either end. */
 export function moveEntryByOne(model, id, step) {
   const found = locateEntry(model, id)
-  const target = found ? found.index + step : -1
-  if (!found || target < 0 || target >= found.section.entries.length) return false
-  found.section.entries.splice(found.index, 1)
-  found.section.entries.splice(target, 0, found.entry)
+  if (!found) return false
+  const entries = entriesOf(model, found.section)
+  const target = found.index + step
+  if (target < 0 || target >= entries.length) return false
+  entries.splice(found.index, 1)
+  entries.splice(target, 0, found.entry)
   return true
 }
 
-/** Sections an entry could move to: every one except where it is. */
+/** Where an entry could move: the notebook itself (id and title null) or any section, except where it is. */
 export function entryTargets(model, id) {
   const found = locateEntry(model, id)
   if (!found) return []
-  return walk(model)
+  const sections = walk(model)
     .filter((other) => other.section !== found.section)
     .map((other) => ({ id: other.section.id, title: other.section.title, depth: other.depth }))
+  return found.section ? [{ id: null, title: null, depth: 0 }, ...sections] : sections
 }
 
-/** Moves an entry to the end of another section (the top, if that's Unsorted). */
+/** Moves an entry to the end of another section, or of the notebook itself with null. */
 export function moveEntry(model, id, sectionId, today) {
   const found = locateEntry(model, id)
-  const target = locate(model, sectionId)
+  const target = holder(model, sectionId)
   if (!found || !target || target.section === found.section) return false
-  found.section.entries.splice(found.index, 1)
-  if (target.section === findUnsorted(model)) target.section.entries.unshift(found.entry)
-  else target.section.entries.push(found.entry)
-  target.section.edited = today
+  entriesOf(model, found.section).splice(found.index, 1)
+  entriesOf(model, target.section).push(found.entry)
+  touch(target.section, today)
   return true
 }
 
 /**
- * Turns an entry into a section inside the one it's in (or at the top level, from Unsorted):
- * its first line becomes the name and the rest stays as its text.
+ * Turns an entry into a section inside the one it's in (at the top level, from the
+ * notebook itself): its first line becomes the name and the rest stays as its text.
  */
 export function entryToSection(model, id, today) {
   const found = locateEntry(model, id)
-  if (!found) return null
-  const fromUnsorted = found.section === findUnsorted(model)
-  if (!fromUnsorted && found.depth >= MAX_DEPTH) return null
+  if (!found || found.depth >= MAX_DEPTH) return null
   const lines = found.entry.text.split('\n')
   const { title, overflow } = titleFromLine(lines[0])
   const section = createSection(title, today)
   const rest = tidy((overflow ? lines : lines.slice(1)).join('\n'))
   if (rest) section.entries.push(createEntry(rest, found.entry.added))
-  found.section.entries.splice(found.index, 1)
-  found.section.edited = today
-  if (fromUnsorted) model.sections.push(section)
-  else found.section.children.push(section)
+  entriesOf(model, found.section).splice(found.index, 1)
+  touch(found.section, today)
+  ;(found.section ? found.section.children : model.sections).push(section)
   return section
 }
 
-/** Ticks or unticks the nth checklist item in an entry ('intro' for the introduction). */
+/** Ticks or unticks the nth checklist item in an entry. */
 export function toggleCheck(model, id, n, today) {
-  if (id === 'intro') {
-    model.intro = toggleChecklist(model.intro, n)
-    return
-  }
   const found = locateEntry(model, id)
   if (found) setEntryText(model, id, toggleChecklist(found.entry.text, n), today)
 }
@@ -438,18 +459,20 @@ export function moveSectionByOne(model, id, step) {
 }
 
 /**
- * Sections whose name or entries contain `query`: name matches first, each with a snippet
- * and the first matching entry (`entryId`), so the view can scroll to it.
+ * Sections whose name or entries contain `query`, and the notebook itself (id and title
+ * null) if its entries do: name matches first, each with a snippet and the first matching
+ * entry (`entryId`), so the view can scroll to it.
  */
 export function searchNotebook(model, query) {
   const needle = query.trim().toLowerCase()
   if (!needle) return []
   const results = []
-  for (const { section } of walk(model)) {
-    const inTitle = section.title.toLowerCase().includes(needle)
-    const match = section.entries.find((entry) => entry.text.toLowerCase().includes(needle))
+  for (const { section } of [{ section: null }, ...walk(model)]) {
+    const entries = entriesOf(model, section)
+    const inTitle = Boolean(section?.title.toLowerCase().includes(needle))
+    const match = entries.find((entry) => entry.text.toLowerCase().includes(needle))
     if (!inTitle && !match) continue
-    const text = (match ?? section.entries[0])?.text ?? ''
+    const text = (match ?? entries[0])?.text ?? ''
     const at = match ? text.toLowerCase().indexOf(needle) : -1
     const flat = (from, to) => text.slice(Math.max(0, from), to).replace(/\s+/g, ' ').trim()
     const snippet =
@@ -457,10 +480,10 @@ export function searchNotebook(model, query) {
         ? flat(0, 90)
         : `${at > 40 ? '…' : ''}${flat(at - 40, at + needle.length + 60)}${at + needle.length + 60 < text.length ? '…' : ''}`
     results.push({
-      id: section.id,
+      id: section?.id ?? null,
       entryId: match?.id ?? null,
-      title: section.title,
-      path: pathTo(model, section.id).slice(0, -1).map((parent) => parent.title),
+      title: section?.title ?? null,
+      path: section ? pathTo(model, section.id).slice(0, -1).map((parent) => parent.title) : [],
       inTitle,
       snippet,
     })
@@ -471,8 +494,10 @@ export function searchNotebook(model, query) {
 /** "12 sections · edited Oct 23" for the Standard Notes note list. */
 export function previewNotebook(model, today) {
   const all = walk(model).map((entry) => entry.section)
-  if (all.length === 0) return model.intro ? 'No sections yet' : 'Empty notebook'
-  const latest = all.reduce((best, section) => (section.edited && section.edited > (best ?? '') ? section.edited : best), null)
+  if (all.length === 0) return model.entries.length > 0 ? 'No sections yet' : 'Empty notebook'
+  // Something added on the front page counts as an edit too.
+  const dates = [...all.map((section) => section.edited), ...model.entries.map((entry) => entry.added)]
+  const latest = dates.reduce((best, date) => (date && date > (best ?? '') ? date : best), null)
   const count = `${all.length} ${all.length === 1 ? 'section' : 'sections'}`
   return latest ? `${count} · edited ${shortDate(latest, today)}` : count
 }

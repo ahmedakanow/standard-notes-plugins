@@ -192,7 +192,6 @@ function demoText() {
       '<!-- organizer: notebook -->',
       'Everything about sleeping better, in one place.',
       '',
-      '## Unsorted',
       `<!-- entry ${day(0)} -->`,
       'Ask Sam which sleep app he uses',
       '',
