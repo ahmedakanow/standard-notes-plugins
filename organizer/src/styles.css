@@ -783,16 +783,63 @@ h1 {
   border-radius: var(--radius);
 }
 
-/* Notebook */
+/* Notebook
+   A topic opens like a book's contents page. Your writing (names, text, contents, dates)
+   is set in Alegreya, a book face with old-style figures; the tool's controls keep the
+   theme's sans-serif. Every color comes from the Standard Notes theme. */
+
+@font-face {
+  font-family: 'Alegreya';
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url('../fonts/alegreya-latin-wght-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Alegreya';
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url('../fonts/alegreya-latin-ext-wght-normal.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Alegreya';
+  font-style: italic;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url('../fonts/alegreya-latin-wght-italic.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Alegreya';
+  font-style: italic;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url('../fonts/alegreya-latin-ext-wght-italic.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 .page:has(.notebook) {
   max-width: 64rem;
 }
 
 .notebook {
+  --serif: 'Alegreya', 'Iowan Old Style', Georgia, serif;
+  --rule: color-mix(in srgb, var(--fg) 13%, var(--bg));
+  --leader: color-mix(in srgb, var(--fg) 38%, var(--bg));
+  --measure: 36rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.75rem;
 }
 
 .nb-topbar {
@@ -804,26 +851,48 @@ h1 {
 .nb-search {
   flex: 1;
   min-width: 0;
+  font: inherit;
   font-size: 0.9375rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: var(--radius);
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 0.5rem 0;
+}
+
+.nb-search::placeholder {
+  color: var(--placeholder);
+}
+
+.nb-search:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
 }
 
 .nb-columns {
   display: grid;
-  grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+  grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr);
   align-items: start;
-  gap: 1.75rem;
+  gap: 2.5rem;
 }
+
+.nb-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+/* The side tree on wide screens: the whole notebook, quietly. */
 
 .nb-tree {
   position: sticky;
   top: 0.75rem;
   max-height: calc(100vh - 1.5rem);
   overflow: auto;
-  padding-right: 0.5rem;
-  border-right: 1px solid var(--border);
-  font-size: 0.875rem;
+  font-family: var(--serif);
+  font-size: 1rem;
 }
 
 .nb-tree ul {
@@ -838,13 +907,12 @@ h1 {
 
 .nb-tree-row {
   display: flex;
-  align-items: center;
-  gap: 0.125rem;
+  align-items: baseline;
 }
 
 .nb-tree-caret {
   flex-shrink: 0;
-  width: 1.25rem;
+  width: 1.125rem;
   font: inherit;
   font-size: 0.75rem;
   color: var(--muted);
@@ -862,78 +930,107 @@ h1 {
   white-space: nowrap;
   font: inherit;
   text-align: left;
-  color: var(--fg);
+  color: var(--muted);
   background: none;
   border: 0;
-  border-radius: 6px;
-  padding: 0.25rem 0.375rem;
+  padding: 0.2rem 0;
   cursor: pointer;
 }
 
 .nb-tree-root {
   display: block;
   width: 100%;
-  margin-bottom: 0.25rem;
-  font-weight: 600;
+  margin-bottom: 0.5rem;
+  font-weight: 700;
+  color: var(--fg);
 }
 
-.nb-tree-link:hover,
-.nb-tree-root:hover {
-  background: var(--surface);
+.nb-tree-link:hover {
+  color: var(--fg);
 }
 
 .is-current > .nb-tree-link,
 .nb-tree-root.is-current {
   color: var(--accent);
-  font-weight: 600;
+  font-weight: 700;
 }
 
-.nb-page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  min-width: 0;
-}
-
-.nb-crumbs {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.8125rem;
-}
-
-.crumb {
-  font: inherit;
-  color: var(--accent);
-  background: none;
-  border: 0;
-  padding: 0.125rem 0;
-  cursor: pointer;
-}
-
-.crumb-sep {
-  color: var(--muted);
-}
-
-.nb-title-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
+/* Titles, the running head, the introduction */
 
 .nb-title {
   flex: 1;
   min-width: 0;
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
   overflow-wrap: anywhere;
+}
+
+.nb-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.nb-title-row .icon-button {
+  margin-top: 0.25rem;
 }
 
 .nb-rename {
   flex: 1;
   min-width: 0;
-  font-size: 1.25rem;
+  font-family: var(--serif);
+  font-size: 1.75rem;
   font-weight: 700;
 }
+
+.nb-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.375rem;
+  margin-bottom: -0.75rem;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.crumb {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.crumb:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+
+.nb-edited {
+  margin-top: -1rem;
+}
+
+.nb-intro .md {
+  font-style: italic;
+  font-size: 1.1875rem;
+}
+
+.nb-add-intro {
+  align-self: flex-start;
+  margin-top: -1rem;
+}
+
+/* Thoughts and the Unsorted slips */
 
 .nb-thought {
   display: flex;
@@ -942,36 +1039,203 @@ h1 {
   gap: 0.5rem;
 }
 
+/* A ruled line to write on, not a form box. */
 .nb-thought .add-input {
   flex: 1 1 14rem;
+  min-height: 0;
+  font-family: var(--serif);
+  font-size: 1.125rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  padding: 0.375rem 0;
 }
 
-.nb-thought .button {
-  height: 2.5rem;
+.nb-thought .add-input:focus {
+  background: transparent;
+  border-bottom-color: var(--accent);
+}
+
+.nb-thought .add-input::placeholder {
+  font-style: italic;
+}
+
+.nb-thought-add {
+  align-self: flex-end;
+  padding-bottom: 0.5rem;
+  font-size: 0.875rem;
 }
 
 .nb-unsorted {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  padding: 0.75rem 1rem 0.25rem;
-  background: var(--surface);
-  border-radius: var(--radius);
+  margin-top: -0.75rem;
+  padding-left: 0.875rem;
+  border-left: 2px solid var(--rule);
 }
 
-.nb-unsorted .nb-row {
-  border-color: var(--bg);
+.nb-label {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted);
 }
 
-.nb-children {
+.nb-count {
+  font-weight: 400;
+}
+
+.nb-slips {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nb-slip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.75rem;
+}
+
+.nb-slip-open {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: 1.0625rem;
+  text-align: left;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  padding: 0.25rem 0;
+  cursor: pointer;
+}
+
+.nb-slip-open:hover {
+  color: var(--accent);
+}
+
+.nb-slip .nb-move {
+  flex-basis: 100%;
+}
+
+/* The contents page: the memorable part */
+
+.nb-contents {
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
+  gap: 0.75rem;
 }
 
-.nb-children > .text-button {
+.nb-contents-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.375rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.nb-contents-head h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 1.1875rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.nb-contents > .text-button {
   align-self: flex-start;
 }
+
+.toc {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--serif);
+}
+
+.toc .toc {
+  margin-top: 0.125rem;
+  padding-left: 1.5rem;
+}
+
+.toc-item.level-1 {
+  padding: 0.5rem 0 0.625rem;
+}
+
+.toc-entry {
+  display: flex;
+  align-items: last baseline;
+  gap: 0.375rem;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  padding: 0.125rem 0;
+  cursor: pointer;
+}
+
+.level-1 > .toc-entry {
+  font-size: 1.3125rem;
+  font-weight: 700;
+}
+
+.level-2 > .toc-entry {
+  font-size: 1.0625rem;
+}
+
+.toc-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toc-entry:hover .toc-title {
+  color: var(--accent);
+}
+
+/* Dotted leaders run from the name to the date, like a book's page numbers. */
+.toc-leader {
+  flex: 1 1 1.5rem;
+  min-width: 1.5rem;
+  align-self: last baseline;
+  height: 0;
+  border-bottom: 0.15em dotted var(--leader);
+}
+
+.toc-meta {
+  flex: none;
+  font-size: 0.875em;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: oldstyle-nums;
+}
+
+.toc-preview,
+.toc-more {
+  margin: 0.125rem 0 0.25rem;
+  font-size: 1rem;
+  font-style: italic;
+  color: var(--muted);
+}
+
+.toc-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toc-more {
+  font-size: 0.9375rem;
+}
+
+/* Arrange mode and search results */
 
 .nb-list {
   margin: 0;
@@ -984,7 +1248,7 @@ h1 {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 0.25rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--rule);
 }
 
 .nb-row.is-result {
@@ -1005,22 +1269,24 @@ h1 {
   color: var(--fg);
   background: none;
   border: 0;
-  border-radius: 6px;
-  padding: 0.625rem 0.375rem;
+  padding: 0.625rem 0.25rem;
   cursor: pointer;
 }
 
-.nb-open:hover {
-  background: var(--surface);
-}
-
 .nb-row-title {
-  font-weight: 600;
+  font-family: var(--serif);
+  font-size: 1.125rem;
+  font-weight: 700;
   overflow-wrap: anywhere;
 }
 
+.nb-open:hover .nb-row-title {
+  color: var(--accent);
+}
+
 .nb-preview {
-  font-size: 0.875rem;
+  font-family: var(--serif);
+  font-style: italic;
   color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1035,7 +1301,7 @@ h1 {
 
 .nb-page > .nb-menu,
 .nb-page > .nb-move {
-  padding-top: 0;
+  padding: 0;
 }
 
 .nb-move {
@@ -1050,15 +1316,15 @@ h1 {
   margin: 0;
   padding: 0.25rem 0;
   list-style: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
 }
 
 .nb-move-target {
   display: block;
   width: 100%;
-  font: inherit;
-  font-size: 0.875rem;
+  font-family: var(--serif);
+  font-size: 1rem;
   text-align: left;
   color: var(--fg);
   background: none;
@@ -1076,6 +1342,8 @@ h1 {
   align-self: flex-start;
 }
 
+/* Reading and editing a section */
+
 .nb-text {
   display: flex;
   flex-direction: column;
@@ -1087,23 +1355,25 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  max-width: var(--measure);
 }
 
-.nb-add .add-input,
-.nb-editor {
+.nb-add .add-input {
   width: 100%;
 }
 
 .nb-editor {
+  width: 100%;
   min-height: 8rem;
   resize: none;
   overflow: hidden;
-  font: inherit;
+  font-family: var(--serif);
+  font-size: 1.125rem;
   line-height: 1.6;
   color: inherit;
   background: var(--bg);
   border: 1px solid var(--accent);
-  border-radius: var(--radius);
+  border-radius: 6px;
   padding: 0.75rem 0.875rem;
 }
 
@@ -1119,23 +1389,29 @@ h1 {
 .tool {
   min-width: 2.25rem;
   height: 2.25rem;
-  font: inherit;
-  font-size: 0.9375rem;
+  font-family: var(--serif);
+  font-size: 1.0625rem;
   font-weight: 700;
   color: var(--fg);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: 1px solid var(--rule);
   border-radius: 6px;
   cursor: pointer;
 }
 
-.tool[aria-label='Italic'] {
-  font-style: italic;
+.tool:hover {
+  background: var(--surface);
 }
 
-/* Formatted section text */
+.tool[aria-label='Italic'] {
+  font-style: italic;
+  font-weight: 400;
+}
 
 .md {
+  max-width: var(--measure);
+  font-family: var(--serif);
+  font-size: 1.1875rem;
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -1153,30 +1429,35 @@ h1 {
 .md ol,
 .md blockquote,
 .md pre {
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.8em;
 }
 
 .md ul,
 .md ol {
-  padding-left: 1.5rem;
+  padding-left: 1.25em;
 }
 
 .md li > ul,
 .md li > ol {
-  margin: 0.25rem 0;
+  margin: 0.2em 0;
 }
 
 .md .md-check {
   list-style: none;
-  margin-left: -1.375rem;
+  margin-left: -1.25em;
+}
+
+.md .md-check label {
+  cursor: pointer;
 }
 
 .md .md-check input {
-  width: 1rem;
-  height: 1rem;
-  margin: 0 0.25rem 0 0;
-  vertical-align: -0.125rem;
+  width: 1.1em;
+  height: 1.1em;
+  margin: 0 0.35em 0 0;
+  vertical-align: -0.15em;
   accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .md-heading {
@@ -1184,14 +1465,15 @@ h1 {
 }
 
 .md blockquote {
-  padding: 0.25rem 0 0.25rem 0.875rem;
+  padding-left: 1em;
+  font-style: italic;
   color: var(--muted);
-  border-left: 3px solid var(--border);
+  border-left: 2px solid var(--rule);
 }
 
 .md code {
   font-family: var(--sn-stylekit-monospace-font, ui-monospace, SFMono-Regular, Consolas, monospace);
-  font-size: 0.875em;
+  font-size: 0.8em;
   background: var(--surface);
   border-radius: 4px;
   padding: 0.1em 0.3em;
@@ -1201,7 +1483,7 @@ h1 {
   overflow-x: auto;
   padding: 0.75rem;
   background: var(--surface);
-  border-radius: var(--radius);
+  border-radius: 6px;
 }
 
 .md pre code {
@@ -1211,18 +1493,33 @@ h1 {
 
 .md hr {
   border: 0;
-  border-top: 1px solid var(--border);
-  margin: 1rem 0;
+  border-top: 1px solid var(--rule);
+  margin: 1.5em 0;
 }
 
 .md a {
   color: var(--accent);
+  text-underline-offset: 0.15em;
 }
 
 mark {
   color: inherit;
   background: color-mix(in srgb, var(--accent) 25%, transparent);
   border-radius: 3px;
+}
+
+@media (max-width: 480px) {
+  .nb-title {
+    font-size: 2rem;
+  }
+
+  .level-1 > .toc-entry {
+    font-size: 1.1875rem;
+  }
+
+  .md {
+    font-size: 1.125rem;
+  }
 }
 
 @media (max-width: 480px) {

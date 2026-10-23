@@ -52,11 +52,14 @@ const clickButton = (frame, label) =>
     if (!button) throw new Error(`no button "${label}"`)
     button.click()
   }, label)
+// Opens a section from the contents page, an Arrange-mode row or an Unsorted slip.
 const openRow = (frame, title) =>
   frame.evaluate((title) => {
-    const row = [...document.querySelectorAll('.nb-open')].find((button) => button.querySelector('.nb-row-title')?.textContent === title)
-    if (!row) throw new Error(`no section row "${title}"`)
-    row.click()
+    const entry = [...document.querySelectorAll('.toc-entry, .nb-open, .nb-slip-open')].find(
+      (button) => (button.querySelector('.toc-title, .nb-row-title') ?? button).textContent === title,
+    )
+    if (!entry) throw new Error(`no section "${title}" to open`)
+    entry.click()
   }, title)
 const rowMenu = (frame, title) => frame.click(`[aria-label="More actions for ${title}"]`)
 const setValue = (frame, selector, value) =>
@@ -69,8 +72,14 @@ const setValue = (frame, selector, value) =>
     value,
   )
 const text = (frame, selector) => frame.$eval(selector, (el) => el.textContent)
-const rowTitles = (frame, scope = '.nb-page .nb-children') =>
-  frame.$$eval(`${scope} > .nb-list > .nb-row .nb-row-title`, (els) => els.map((el) => el.textContent))
+// Top-level entries of the page's contents (or, in Arrange mode, its rows).
+const contents = (frame) =>
+  frame.$$eval('.nb-page .nb-contents > .toc > .level-1 > .toc-entry .toc-title, .nb-page .nb-contents .nb-row-title', (els) =>
+    els.map((el) => el.textContent),
+  )
+const subContents = (frame) =>
+  frame.$$eval('.nb-page .nb-contents .level-2 > .toc-entry .toc-title', (els) => els.map((el) => el.textContent))
+const slips = (frame) => frame.$$eval('.nb-unsorted .nb-slip-open', (els) => els.map((el) => el.textContent))
 
 const PASTED = ['Sleep', 'I sleep badly.', '', '# Tips', '- No coffee after 2pm', '- [ ] Buy blackout curtains'].join('\n')
 
@@ -82,7 +91,7 @@ await check('choosing Notebook writes the marker and shows the empty notebook', 
   await wait(900)
   assert.equal(await saved(), MARKER)
   assert.equal(await text(frame, '.nb-page .nb-title'), 'A', 'named after the note')
-  assert.match(await text(frame, '.nb-children .empty'), /No sections yet/)
+  assert.match(await text(frame, '.nb-contents .empty'), /No sections yet/)
 })
 
 await check('a thought goes into Unsorted, which appears at the top', async () => {
@@ -91,7 +100,7 @@ await check('a thought goes into Unsorted, which appears at the top', async () =
   await page.keyboard.press('Enter')
   await wait(900)
   assert.equal(await saved(), `${MARKER}\n\n## Unsorted\n\n### Try magnesium\n${EDITED}`)
-  assert.deepEqual(await rowTitles(frame, '.nb-unsorted'), ['Try magnesium'])
+  assert.deepEqual(await slips(frame), ['Try magnesium'])
 })
 
 await check('pasting a note makes a section, and its headings become sections inside it', async () => {
@@ -105,15 +114,16 @@ await check('pasting a note makes a section, and its headings become sections in
     ),
     await saved(),
   )
-  assert.deepEqual(await rowTitles(frame), ['Sleep'])
-  assert.equal(await text(frame, '.nb-children .nb-row .nb-preview'), 'I sleep badly.')
-  assert.match(await text(frame, '.nb-children .nb-row .meta'), /^1 inside · edited /)
+  assert.deepEqual(await contents(frame), ['Sleep'])
+  assert.deepEqual(await subContents(frame), ['Tips'], 'the contents show two levels')
+  assert.equal(await text(frame, '.toc-preview'), 'I sleep badly.')
+  assert.match(await text(frame, '.level-1 > .toc-entry .toc-meta'), /^[A-Z][a-z]{2} \d{1,2}$/, 'edited date after the leader')
 })
 
 await check('opening sections, with a trail back', async () => {
   await openRow(frame, 'Sleep')
   assert.equal(await text(frame, '.nb-page .nb-title'), 'Sleep')
-  assert.deepEqual(await rowTitles(frame), ['Tips'])
+  assert.deepEqual(await contents(frame), ['Tips'])
   await openRow(frame, 'Tips')
   assert.deepEqual(await frame.$$eval('.nb-crumbs .crumb', (els) => els.map((el) => el.textContent)), ['A', 'Sleep'])
   assert.equal(await frame.$$eval('.md li', (els) => els.length), 2, 'the list is formatted')
@@ -122,10 +132,15 @@ await check('opening sections, with a trail back', async () => {
   await openRow(frame, 'Tips')
 })
 
-await check('ticking a checklist item while reading saves it', async () => {
+await check('ticking a checklist item while reading saves it, by its box or its words', async () => {
   await frame.click('.md input[type="checkbox"]')
   await wait(900)
   assert.match(await saved(), /- \[x\] Buy blackout curtains/)
+  await frame.evaluate(() => [...document.querySelectorAll('.md-check label')].at(-1).click())
+  await wait(900)
+  assert.match(await saved(), /- \[ \] Buy blackout curtains/)
+  await frame.click('.md input[type="checkbox"]')
+  await wait(900)
 })
 
 await check('typing saves after a pause, and the toolbar formats the selection', async () => {
@@ -184,28 +199,33 @@ await check('renaming and moving from the menu', async () => {
   assert.deepEqual(await frame.$$eval('.nb-crumbs .crumb', (els) => els.map((el) => el.textContent)), ['A'])
 })
 
-await check('filing a thought from Unsorted with Move', async () => {
+await check('filing a thought from Unsorted', async () => {
   await clickButton(frame, 'A')
-  await rowMenu(frame, 'Try magnesium')
-  await clickButton(frame, 'Move…')
+  await frame.click('[aria-label="File Try magnesium"]')
+  assert.match(await text(frame, '.nb-move .meta'), /^File "Try magnesium" under:$/)
   await frame.evaluate(() => [...document.querySelectorAll('.nb-move-target')].find((b) => b.textContent === 'Sleep').click())
   await wait(900)
   assert.match(await saved(), /## Sleep\n[\s\S]*### Try magnesium/)
   assert.equal(await frame.$('.nb-unsorted'), null, 'Unsorted is empty, so it hides')
 })
 
-await check('deleting takes two taps, and says what else goes with it', async () => {
+await check('deleting (in Arrange) takes two taps, and says what else goes with it', async () => {
+  assert.equal(await frame.$('[aria-label="More actions for Sleep"]'), null, 'the contents page has no row menus')
+  await clickButton(frame, 'Arrange')
   await rowMenu(frame, 'Sleep')
   await clickButton(frame, 'Delete')
   assert.match(await saved(), /## Sleep\n/)
   await clickButton(frame, 'Tap again to delete it and 1 inside')
   await wait(900)
   assert.doesNotMatch(await saved(), /## Sleep\n|Try magnesium/)
-  assert.deepEqual(await rowTitles(frame), ['Sleep tips'])
+  assert.deepEqual(await contents(frame), ['Sleep tips'])
+  await clickButton(frame, 'Done arranging')
+  assert.equal(await frame.$('.nb-row'), null)
 })
 
 frame = await open(`${MARKER}\n\n## One\n\n## Two\n\n## Three`)
-await check('reordering sections by dragging and with the arrow keys', async () => {
+await check('reordering sections in Arrange, by dragging and with the arrow keys', async () => {
+  await clickButton(frame, 'Arrange')
   const handle = await frame.$('[aria-label^="Move Three"]')
   const target = await frame.evaluateHandle(() =>
     [...document.querySelectorAll('.nb-row')].find((row) => row.querySelector('.nb-row-title').textContent === 'One'),

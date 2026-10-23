@@ -36,8 +36,9 @@ export function mountNotebook(root, session) {
     editing: null, // id of the section whose text is open for editing, or 'intro'
     query: '',
     highlight: '', // search term to mark in the section opened from a result
+    arranging: false, // the contents list shows drag handles and menus instead of reading view
     menu: null, // id of the section whose ⋯ menu is open
-    moving: null, // id of the section choosing where to move
+    moving: null, // id of the section choosing where to move (or to file, from Unsorted)
     renaming: null,
     renameDraft: null,
     confirmDelete: null,
@@ -79,7 +80,16 @@ export function mountNotebook(root, session) {
   const rootTitle = () => session.title || 'Notebook'
 
   function open(id, { highlight = '' } = {}) {
-    Object.assign(ui, { current: id, editing: null, menu: null, moving: null, renaming: null, adding: null, highlight })
+    Object.assign(ui, {
+      current: id,
+      editing: null,
+      arranging: false,
+      menu: null,
+      moving: null,
+      renaming: null,
+      adding: null,
+      highlight,
+    })
     render()
     document.scrollingElement.scrollTop = 0
   }
@@ -136,7 +146,10 @@ export function mountNotebook(root, session) {
         }
       }
     }
-    return h(node.tag, props, (node.children ?? []).map((child) => toDom(child, key)))
+    const children = (node.children ?? []).map((child) => toDom(child, key))
+    // The whole checklist line ticks the box, which is easier to hit on a phone.
+    if (node.tag === 'li' && props.class === 'md-check') return h('li', props, h('label', {}, children))
+    return h(node.tag, props, children)
   }
 
   function topBar() {
@@ -145,7 +158,7 @@ export function mountNotebook(root, session) {
       { class: 'nb-topbar' },
       h('input', {
         type: 'search',
-        class: 'field nb-search',
+        class: 'nb-search',
         placeholder: 'Search this notebook',
         'aria-label': 'Search this notebook',
         value: ui.query,
@@ -269,17 +282,11 @@ export function mountNotebook(root, session) {
         ui.renaming === section.id ? renameInput(section, ctx) : h('h1', { class: 'nb-title' }, section.title),
         moreButton(section),
       ),
-      section.edited && h('p', { class: 'meta' }, `Edited ${shortDate(section.edited, ctx.today)}`),
+      section.edited && h('p', { class: 'meta nb-edited' }, `Edited ${shortDate(section.edited, ctx.today)}`),
       ui.menu === section.id && sectionMenu(section, depth, ctx),
       ui.moving === section.id && movePicker(section),
       textBlock(section.id, section.text, ctx),
-      h(
-        'div',
-        { class: 'nb-children' },
-        section.children.length > 0 && h('h2', { class: 'section-title' }, 'Inside'),
-        sectionList(section.children, ctx),
-        depth < MAX_DEPTH && addControl(section.id, ctx),
-      ),
+      contentsBlock(section.id, section.children, depth < MAX_DEPTH, ctx),
     )
   }
 
@@ -291,32 +298,121 @@ export function mountNotebook(root, session) {
       'section',
       { class: 'nb-page', 'aria-label': rootTitle() },
       h('h1', { class: 'nb-title' }, rootTitle()),
+      model.intro || ui.editing === 'intro'
+        ? h('div', { class: 'nb-intro' }, textBlock('intro', model.intro, ctx))
+        : h(
+            'button',
+            { type: 'button', class: 'text-button nb-add-intro', onclick: () => startEditing('intro') },
+            'Add an introduction',
+          ),
       thoughtBox(ctx),
-      unsorted &&
-        unsorted.children.length > 0 &&
+      unsorted && unsorted.children.length > 0 && unsortedBlock(unsorted),
+      contentsBlock(null, sections, true, ctx),
+    )
+  }
+
+  /** Loose thoughts, each with a File button that opens the move picker. */
+  function unsortedBlock(unsorted) {
+    return h(
+      'section',
+      { class: 'nb-unsorted', 'aria-label': 'Unsorted' },
+      h('h2', { class: 'nb-label' }, 'Unsorted ', h('span', { class: 'nb-count' }, String(unsorted.children.length))),
+      h(
+        'ul',
+        { class: 'nb-slips' },
+        unsorted.children.map((thought) =>
+          h(
+            'li',
+            { class: 'nb-slip' },
+            h(
+              'button',
+              { type: 'button', class: 'nb-slip-open', 'data-always': '', onclick: () => open(thought.id) },
+              thought.title,
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'text-button',
+                'aria-expanded': String(ui.moving === thought.id),
+                'aria-label': `File ${thought.title}`,
+                onclick: () => {
+                  ui.moving = ui.moving === thought.id ? null : thought.id
+                  render()
+                },
+              },
+              'File',
+            ),
+            ui.moving === thought.id && movePicker(thought),
+          ),
+        ),
+      ),
+    )
+  }
+
+  /**
+   * A contents page: section names with dotted leaders to when each was last edited, and
+   * the sections inside them indented underneath. Arrange swaps it for handles and menus.
+   */
+  function contentsBlock(parentId, sections, canAdd, ctx) {
+    const arranging = ui.arranging && sections.length > 0
+    return h(
+      'section',
+      { class: 'nb-contents', 'aria-label': 'Contents' },
+      (sections.length > 0 || parentId === null) &&
         h(
           'div',
-          { class: 'nb-unsorted' },
-          h(
-            'div',
-            { class: 'section-head' },
-            h('h2', { class: 'section-title' }, `Unsorted (${unsorted.children.length})`),
-            h('span', { class: 'meta' }, 'File them with ⋯ → Move'),
-          ),
-          sectionList(unsorted.children, ctx),
+          { class: 'nb-contents-head' },
+          h('h2', {}, 'Contents'),
+          sections.length > 0 &&
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'text-button',
+                'aria-pressed': String(arranging),
+                onclick: () => {
+                  ui.arranging = !arranging
+                  ui.menu = null
+                  ui.moving = null
+                  render()
+                },
+              },
+              arranging ? 'Done arranging' : 'Arrange',
+            ),
         ),
-      (model.intro || ui.editing === 'intro') && textBlock('intro', model.intro, ctx),
+      sections.length === 0 &&
+        parentId === null &&
+        h('p', { class: 'empty' }, 'No sections yet. Add one, or paste a whole note.'),
+      arranging ? sectionList(sections, ctx) : h('ul', { class: 'toc' }, sections.map((section) => tocEntry(section, 1, ctx))),
+      canAdd && addControl(parentId, ctx),
+    )
+  }
+
+  function tocEntry(section, level, ctx) {
+    const preview = level === 1 && plainPreview(section.text)
+    const deeper = level === 2 ? countInside(section) : 0
+    return h(
+      'li',
+      { class: `toc-item level-${level}` },
       h(
-        'div',
-        { class: 'nb-children' },
-        h('h2', { class: 'section-title' }, 'Sections'),
-        sections.length === 0 && h('p', { class: 'empty' }, 'No sections yet. Add one, or paste a whole note.'),
-        sectionList(sections, ctx),
-        addControl(null, ctx),
+        'button',
+        { type: 'button', class: 'toc-entry', 'data-always': '', onclick: () => open(section.id) },
+        h('span', { class: 'toc-title' }, section.title),
+        section.edited && [
+          h('span', { class: 'toc-leader', 'aria-hidden': 'true' }),
+          h('span', { class: 'toc-meta' }, shortDate(section.edited, ctx.today)),
+        ],
       ),
-      !model.intro &&
-        ui.editing !== 'intro' &&
-        h('button', { type: 'button', class: 'text-button', onclick: () => startEditing('intro') }, 'Add an introduction'),
+      preview && h('p', { class: 'toc-preview' }, preview),
+      level === 1 &&
+        section.children.length > 0 &&
+        h(
+          'ul',
+          { class: 'toc' },
+          section.children.map((child) => tocEntry(child, 2, ctx)),
+        ),
+      deeper > 0 && h('p', { class: 'toc-more' }, `and ${deeper} more inside`),
     )
   }
 
@@ -430,12 +526,8 @@ export function mountNotebook(root, session) {
       sections.map((section) => sectionRow(section, ctx)),
     )
 
+  /** A row in Arrange mode: drag handle, name and ⋯ menu. */
   function sectionRow(section, ctx) {
-    const inside = countInside(section)
-    const meta = [inside > 0 && `${inside} inside`, section.edited && `edited ${shortDate(section.edited, ctx.today)}`]
-      .filter(Boolean)
-      .join(' · ')
-    const preview = plainPreview(section.text)
     return h(
       'li',
       { class: 'nb-row', dataset: { id: section.id } },
@@ -444,8 +536,6 @@ export function mountNotebook(root, session) {
         'button',
         { type: 'button', class: 'nb-open', 'data-always': '', onclick: () => open(section.id) },
         h('span', { class: 'nb-row-title' }, section.title),
-        preview && h('span', { class: 'nb-preview' }, preview),
-        meta && h('span', { class: 'meta' }, meta),
       ),
       moreButton(section),
       ui.menu === section.id && sectionMenu(section, locate(session.model, section.id).depth, ctx),
@@ -523,10 +613,12 @@ export function mountNotebook(root, session) {
 
   function movePicker(section) {
     const targets = moveTargets(session.model, section.id)
+    const filing = locate(session.model, section.id)?.parent === findUnsorted(session.model)
+    const prompt = filing ? `File "${section.title}" under:` : `Move "${section.title}" into:`
     return h(
       'div',
       { class: 'nb-move' },
-      h('p', { class: 'meta' }, targets.length ? `Move "${section.title}" into:` : 'There is nowhere else this section fits.'),
+      h('p', { class: 'meta' }, targets.length ? prompt : 'There is nowhere else this section fits.'),
       h(
         'ul',
         { class: 'nb-move-list' },
@@ -681,7 +773,7 @@ export function mountNotebook(root, session) {
           add()
         },
       }),
-      h('button', { type: 'button', class: 'button primary', onclick: add }, 'Add'),
+      h('button', { type: 'button', class: 'text-button nb-thought-add', onclick: add }, 'Add'),
     )
   }
 
