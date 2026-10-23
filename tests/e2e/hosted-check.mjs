@@ -9,7 +9,10 @@ const PLUGINS = [
     path: 'organizer',
     demo: 'notebook',
     ready: '.notebook',
-    probe: () => `notebook with ${document.querySelectorAll('.nb-row').length} sections shown`,
+    probe: () =>
+      `notebook with ${document.querySelectorAll('.toc-item').length} contents entries, Alegreya ${
+        document.fonts.check('1em Alegreya') ? 'loaded' : 'NOT loaded'
+      }`,
   },
 ]
 
