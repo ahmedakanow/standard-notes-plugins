@@ -41,6 +41,9 @@ const session = {
   get readOnly() {
     return state.locked
   },
+  get title() {
+    return state.note?.content?.title ?? ''
+  },
   context,
   save,
   setSetting(key, value) {
@@ -51,6 +54,9 @@ const session = {
 }
 
 function handleNote(note) {
+  // A view may hold back saves while you type (Notebook does). Save that first, so it goes
+  // to the right note and counts as an unsaved edit below.
+  state.view?.flush?.()
   const isNewNote = state.note?.uuid !== note.uuid
   state.note = note
   state.locked = Boolean(note.content?.appData?.['org.standardnotes.sn']?.locked)
@@ -178,8 +184,39 @@ function showUnsupported(id) {
   )
 }
 
+/** Preview mode's `?demo` note; `?demo=notebook` shows a Notebook instead of Todos. */
 function demoText() {
   const day = (offset) => addDays(todayIso(), offset)
+  if (new URLSearchParams(location.search).get('demo') === 'notebook') {
+    return [
+      '<!-- organizer: notebook -->',
+      'Everything about sleeping better, in one place.',
+      '',
+      '## Unsorted',
+      '### Ask Sam which sleep app he uses',
+      `<!-- edited ${day(0)} -->`,
+      '',
+      '## Routine',
+      `<!-- edited ${day(-6)} -->`,
+      'What seems to work, roughly in order of how much it helps.',
+      '',
+      '### Evening',
+      `<!-- edited ${day(-2)} -->`,
+      '- **No screens** after 10pm',
+      '- [x] Blackout curtains',
+      '- [ ] Try magnesium for two weeks',
+      '',
+      '### Morning',
+      'Up at 7, daylight within the first hour. See [why light matters](https://example.com/light).',
+      '',
+      "## What the doctor said",
+      `<!-- edited ${day(-40)} -->`,
+      '> Sleep apnea is unlikely; keep a diary for a month.',
+      '',
+      '### Sleep diary',
+      'Bed 23:10, up 07:05, woke twice.',
+    ].join('\n')
+  }
   return [
     '<!-- organizer: todos -->',
     '',

@@ -2,7 +2,8 @@
 
 Notes shaped for what they hold. The first time you open a note with Organizer, you choose what it's for:
 
-- **Todos**: available now
+- **Todos**: things to do, with a routine, groups, and stale todos parked instead of lost
+- **Notebook**: one topic in one note, organized into sections you can browse
 - **People**: coming next
 
 Everything is stored as plain Markdown, so your notes still read well in the plain editor, in exports and on any device. Text Organizer doesn't recognise is kept, never dropped.
@@ -43,6 +44,37 @@ In the plain editor a Todos note looks like this:
 
 Any `## Heading` other than Parked and Done is a group, so typing one on your phone makes a group. Todos are written in your order. Parked and done todos remember their group with a `group Name` detail, and return to it when brought back. The first date is when the todo was last touched. Only the text is required, so a quick `- [ ] buy bread` typed anywhere is a valid todo; Organizer dates it the next time it opens the note. For repeating todos, `every` takes `day`, `weekday` or day names, and the checkbox just shows whether it's done today: tick them in Organizer so the streak counts.
 
+## Notebook
+
+Everything about one topic, such as Health, a project or a trip, in one note, organized like folders. Instead of a dozen scattered notes you can't find again, you get one place where you can see everything at a glance.
+
+- **Sections** have a name, their own text, and sections inside them, up to five levels deep. Tap one to open it; the trail at the top ("Health › Sleep") takes you back. On a wide screen the whole tree stays on the left.
+- **Bring notes in** with **+ Add section**: paste a whole note and its first line becomes the section's name, the rest its text, and any headings in it become sections inside. Then archive the original note.
+- **Add a thought** at the top drops a quick note into **Unsorted**. File it later with its **⋯ → Move…**.
+- **Reading** shows your text formatted: bold, italics, lists, checklists you can tick, links, quotes and code. Images show as links instead of loading. **Edit** opens the text with a small toolbar (bold, italic, list, checklist, link).
+- **Organizing:** each section's **⋯** menu renames, adds a section inside, moves (only to places it fits) or deletes it, which takes two taps. Drag the **⠿** handle, or use the arrow keys on it, to reorder sections.
+- **Search** covers every section's name and text. Name matches come first, and opening a result highlights the match.
+- Each section shows when it was last edited. Typing saves after a two-second pause, because every save re-uploads the whole note; keep a notebook to one topic, well under a megabyte.
+
+In the plain editor a Notebook note looks like this:
+
+```markdown
+<!-- organizer: notebook -->
+Everything about sleeping better.
+
+## Unsorted
+### Ask Sam which sleep app he uses
+
+## Routine
+<!-- edited 2026-10-20 -->
+What seems to work.
+
+### Evening
+- [x] Blackout curtains
+```
+
+`##` is the top level and `######` the fifth. The `edited` lines are hidden in formatted views. Text that would read as a heading is saved as `\## …` so it stays text.
+
 ## Install it
 
 In Standard Notes on desktop, web or phone, open **Preferences → Plugins → Install Custom Plugin** and enter:
@@ -57,7 +89,7 @@ Then create a note, open the editor menu and pick **Organizer**. The first time,
 
 From the repository root, `npm install` once, then `npm start`.
 
-- <http://localhost:8001/organizer/> runs it in **preview mode** outside Standard Notes. Add `?demo` for a filled-in list or `?reset` to start over.
+- <http://localhost:8001/organizer/> runs it in **preview mode** outside Standard Notes. Add `?demo` for a filled-in todo list, `?demo=notebook` for a notebook, or `?reset` to start over.
 - To try local changes inside Standard Notes, install `http://localhost:8001/organizer/ext.local.json`. It shows up as **Organizer (local)**.
 
 `npm test` runs the unit tests. Bump `version` in `ext.json` when you release changes, and never change `identifier`.
@@ -71,4 +103,8 @@ From the repository root, `npm install` once, then `npm start`.
 | `src/note.js` | The `<!-- organizer: … -->` marker line. |
 | `src/todos.js` | Todos rules and plain-text format. No DOM. |
 | `src/todos-view.js` | The Todos screen. |
+| `src/notebook.js` | Notebook's section tree and plain-text format. No DOM. |
+| `src/notebook-view.js` | The Notebook screen. |
+| `src/markdown.js` | Formatted reading: Markdown to a safe tree the view turns into DOM as text only. |
+| `src/editing.js` | The editor toolbar's actions. |
 | `src/dates.js`, `src/dom.js` | Small date and DOM helpers. |

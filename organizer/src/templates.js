@@ -1,3 +1,5 @@
+import { mountNotebook } from './notebook-view.js'
+import { parseNotebook, previewNotebook, serializeNotebook } from './notebook.js'
 import { mountTodos } from './todos-view.js'
 import { normalizeTodos, parseTodos, previewTodos, serializeTodos } from './todos.js'
 
@@ -15,6 +17,17 @@ export const TEMPLATES = [
     serialize: (model, ctx) => serializeTodos(model, ctx.today),
     preview: (model, ctx) => previewTodos(model, ctx.today),
     mount: mountTodos,
+  },
+  {
+    id: 'notebook',
+    name: 'Notebook',
+    icon: '📓',
+    blurb: 'One topic, organized into sections you can browse.',
+    parse: (body) => parseNotebook(body),
+    refresh: () => false,
+    serialize: (model) => serializeNotebook(model),
+    preview: (model, ctx) => previewNotebook(model, ctx.today),
+    mount: mountNotebook,
   },
   {
     id: 'people',

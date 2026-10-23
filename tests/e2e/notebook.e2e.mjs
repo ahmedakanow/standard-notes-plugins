@@ -1,0 +1,339 @@
+// End-to-end checks of Organizer's Notebook template inside the fake Standard Notes host.
+import { join } from 'node:path'
+import assert from 'node:assert/strict'
+import { HOST, PLUGIN, SHOTS_DIR, launchBrowser, wait } from './support.mjs'
+
+const pad = (n) => String(n).padStart(2, '0')
+const TODAY = (() => {
+  const now = new Date()
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+})()
+const MARKER = '<!-- organizer: notebook -->'
+const EDITED = `<!-- edited ${TODAY} -->`
+
+const browser = await launchBrowser({ args: ['--hide-scrollbars'] })
+const page = await browser.newPage()
+await page.setViewport({ width: 1000, height: 1200 })
+const errors = []
+page.on('pageerror', (error) => errors.push(error.message))
+page.on('console', (message) => message.type() === 'error' && errors.push(message.text()))
+page.on('response', (response) => response.status() >= 400 && errors.push(`${response.status()} ${response.url()}`))
+page.on('dialog', (dialog) => {
+  errors.push(`dialog: ${dialog.message()}`)
+  dialog.dismiss()
+})
+
+const results = []
+async function check(name, fn) {
+  try {
+    await fn()
+    results.push(`PASS  ${name}`)
+  } catch (error) {
+    results.push(`FAIL  ${name}\n      ${error.message.split('\n').join('\n      ')}`)
+  }
+}
+
+async function open(text = null, extra = '') {
+  const query = new URLSearchParams({ plugin: 'organizer' })
+  if (text !== null) query.set('text', text)
+  const file = extra.includes('mobile') ? 'mobile.html' : 'index.html'
+  await page.goto(`${HOST}/${file}?${query}${extra.replace('mobile', '')}`, { waitUntil: 'load' })
+  await wait(300)
+  const frame = page.frames().find((candidate) => candidate.url().startsWith(`${PLUGIN}/organizer`))
+  await frame.waitForSelector('#page:not([hidden])', { timeout: 5000 })
+  return frame
+}
+const hostFrame = () => page.frames().find((candidate) => candidate.url().startsWith(`${HOST}/index.html`))
+const saved = async () => (await hostFrame().evaluate(() => harness.notes.a.content.text)) ?? ''
+const saveCount = () => hostFrame().evaluate(() => harness.saves.length)
+const clickButton = (frame, label) =>
+  frame.evaluate((label) => {
+    const button = [...document.querySelectorAll('button')].find((candidate) => candidate.textContent.trim() === label)
+    if (!button) throw new Error(`no button "${label}"`)
+    button.click()
+  }, label)
+const openRow = (frame, title) =>
+  frame.evaluate((title) => {
+    const row = [...document.querySelectorAll('.nb-open')].find((button) => button.querySelector('.nb-row-title')?.textContent === title)
+    if (!row) throw new Error(`no section row "${title}"`)
+    row.click()
+  }, title)
+const rowMenu = (frame, title) => frame.click(`[aria-label="More actions for ${title}"]`)
+const setValue = (frame, selector, value) =>
+  frame.$eval(
+    selector,
+    (field, value) => {
+      field.value = value
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+    },
+    value,
+  )
+const text = (frame, selector) => frame.$eval(selector, (el) => el.textContent)
+const rowTitles = (frame, scope = '.nb-page .nb-children') =>
+  frame.$$eval(`${scope} > .nb-list > .nb-row .nb-row-title`, (els) => els.map((el) => el.textContent))
+
+const PASTED = ['Sleep', 'I sleep badly.', '', '# Tips', '- No coffee after 2pm', '- [ ] Buy blackout curtains'].join('\n')
+
+let frame = await open()
+
+await check('choosing Notebook writes the marker and shows the empty notebook', async () => {
+  await frame.click('[data-template="notebook"]')
+  await frame.waitForSelector('.notebook')
+  await wait(900)
+  assert.equal(await saved(), MARKER)
+  assert.equal(await text(frame, '.nb-page .nb-title'), 'A', 'named after the note')
+  assert.match(await text(frame, '.nb-children .empty'), /No sections yet/)
+})
+
+await check('a thought goes into Unsorted, which appears at the top', async () => {
+  await frame.click('[data-focus="thought"]')
+  await page.keyboard.type('Try magnesium')
+  await page.keyboard.press('Enter')
+  await wait(900)
+  assert.equal(await saved(), `${MARKER}\n\n## Unsorted\n\n### Try magnesium\n${EDITED}`)
+  assert.deepEqual(await rowTitles(frame, '.nb-unsorted'), ['Try magnesium'])
+})
+
+await check('pasting a note makes a section, and its headings become sections inside it', async () => {
+  await clickButton(frame, '+ Add section')
+  await setValue(frame, '[data-focus="add-top"]', PASTED)
+  await clickButton(frame, 'Add section')
+  await wait(900)
+  assert.ok(
+    (await saved()).endsWith(
+      `## Sleep\n${EDITED}\nI sleep badly.\n\n### Tips\n${EDITED}\n- No coffee after 2pm\n- [ ] Buy blackout curtains`,
+    ),
+    await saved(),
+  )
+  assert.deepEqual(await rowTitles(frame), ['Sleep'])
+  assert.equal(await text(frame, '.nb-children .nb-row .nb-preview'), 'I sleep badly.')
+  assert.match(await text(frame, '.nb-children .nb-row .meta'), /^1 inside · edited /)
+})
+
+await check('opening sections, with a trail back', async () => {
+  await openRow(frame, 'Sleep')
+  assert.equal(await text(frame, '.nb-page .nb-title'), 'Sleep')
+  assert.deepEqual(await rowTitles(frame), ['Tips'])
+  await openRow(frame, 'Tips')
+  assert.deepEqual(await frame.$$eval('.nb-crumbs .crumb', (els) => els.map((el) => el.textContent)), ['A', 'Sleep'])
+  assert.equal(await frame.$$eval('.md li', (els) => els.length), 2, 'the list is formatted')
+  await clickButton(frame, 'Sleep')
+  assert.equal(await text(frame, '.nb-page .nb-title'), 'Sleep')
+  await openRow(frame, 'Tips')
+})
+
+await check('ticking a checklist item while reading saves it', async () => {
+  await frame.click('.md input[type="checkbox"]')
+  await wait(900)
+  assert.match(await saved(), /- \[x\] Buy blackout curtains/)
+})
+
+await check('typing saves after a pause, and the toolbar formats the selection', async () => {
+  await clickButton(frame, 'Edit')
+  await frame.$eval('.nb-editor', (field) => {
+    const at = field.value.indexOf('No coffee')
+    field.setSelectionRange(at, at + 'No coffee'.length)
+  })
+  await frame.click('[aria-label="Bold"]')
+  await page.keyboard.press('End')
+  await page.keyboard.type(' (or tea)')
+  await wait(700)
+  assert.doesNotMatch(await saved(), /or tea/, 'not saved while typing')
+  await wait(2200)
+  assert.match(await saved(), /- \*\*No coffee\*\* after 2pm \(or tea\)/)
+  await clickButton(frame, 'Done')
+  assert.equal(await text(frame, '.md li strong'), 'No coffee')
+})
+
+await check('HTML in a note is shown as text and never runs', async () => {
+  await clickButton(frame, 'Edit')
+  await setValue(frame, '.nb-editor', 'Hi <img src=x onerror="window.__hacked = 1"> <script>window.__hacked = 2</script>')
+  await clickButton(frame, 'Done')
+  await wait(300)
+  assert.equal(await frame.$('.md img, .md script'), null)
+  assert.equal(await frame.evaluate(() => window.__hacked), undefined)
+  assert.match(await text(frame, '.md'), /<img src=x/)
+})
+
+await check('search finds text, and opens the section with the match marked', async () => {
+  await clickButton(frame, 'Edit')
+  await setValue(frame, '.nb-editor', '- [x] Buy blackout curtains')
+  await clickButton(frame, 'Done')
+  await frame.click('.nb-search')
+  await page.keyboard.type('curtains')
+  assert.equal(await text(frame, '.nb-row.is-result .nb-row-title'), 'Tips')
+  assert.equal(await text(frame, '.nb-row.is-result .meta'), 'Sleep')
+  await frame.click('.nb-row.is-result .nb-open')
+  assert.equal(await text(frame, '.nb-page .nb-title'), 'Tips')
+  assert.equal(await text(frame, '.md mark'), 'curtains')
+})
+
+await check('renaming and moving from the menu', async () => {
+  await rowMenu(frame, 'Tips')
+  await clickButton(frame, 'Rename')
+  await frame.$eval('.nb-rename', (input) => input.select())
+  await page.keyboard.type('Sleep tips')
+  await page.keyboard.press('Enter')
+  await wait(900)
+  assert.match(await saved(), /### Sleep tips\n/)
+  await rowMenu(frame, 'Sleep tips')
+  await clickButton(frame, 'Move…')
+  await clickButton(frame, 'Top level')
+  await wait(900)
+  assert.match(await saved(), /\n## Sleep tips\n/)
+  assert.deepEqual(await frame.$$eval('.nb-crumbs .crumb', (els) => els.map((el) => el.textContent)), ['A'])
+})
+
+await check('filing a thought from Unsorted with Move', async () => {
+  await clickButton(frame, 'A')
+  await rowMenu(frame, 'Try magnesium')
+  await clickButton(frame, 'Move…')
+  await frame.evaluate(() => [...document.querySelectorAll('.nb-move-target')].find((b) => b.textContent === 'Sleep').click())
+  await wait(900)
+  assert.match(await saved(), /## Sleep\n[\s\S]*### Try magnesium/)
+  assert.equal(await frame.$('.nb-unsorted'), null, 'Unsorted is empty, so it hides')
+})
+
+await check('deleting takes two taps, and says what else goes with it', async () => {
+  await rowMenu(frame, 'Sleep')
+  await clickButton(frame, 'Delete')
+  assert.match(await saved(), /## Sleep\n/)
+  await clickButton(frame, 'Tap again to delete it and 1 inside')
+  await wait(900)
+  assert.doesNotMatch(await saved(), /## Sleep\n|Try magnesium/)
+  assert.deepEqual(await rowTitles(frame), ['Sleep tips'])
+})
+
+frame = await open(`${MARKER}\n\n## One\n\n## Two\n\n## Three`)
+await check('reordering sections by dragging and with the arrow keys', async () => {
+  const handle = await frame.$('[aria-label^="Move Three"]')
+  const target = await frame.evaluateHandle(() =>
+    [...document.querySelectorAll('.nb-row')].find((row) => row.querySelector('.nb-row-title').textContent === 'One'),
+  )
+  const from = await handle.boundingBox()
+  const to = await target.asElement().boundingBox()
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height * 0.25, { steps: 10 })
+  await page.mouse.up()
+  await wait(900)
+  assert.equal(await saved(), `${MARKER}\n\n## Three\n\n## One\n\n## Two`)
+  await frame.focus('[aria-label^="Move Two"]')
+  await page.keyboard.press('ArrowUp')
+  await wait(900)
+  assert.equal(await saved(), `${MARKER}\n\n## Three\n\n## Two\n\n## One`)
+})
+
+await check('switching notes while typing saves the typing to the right note first', async () => {
+  await openRow(frame, 'One')
+  await clickButton(frame, 'Add text')
+  await page.keyboard.type('typed just before switching')
+  await hostFrame().evaluate(() => harness.showNote('b'))
+  await wait(900)
+  assert.match(await saved(), /## One\n<!-- edited .* -->\ntyped just before switching/)
+  assert.doesNotMatch(await hostFrame().evaluate(() => harness.notes.b.content.text), /typed just before/)
+})
+
+const DEMO = [
+  MARKER,
+  'Everything about sleeping better, in one place.',
+  '',
+  '## Unsorted',
+  '### Ask Sam which sleep app he uses',
+  EDITED,
+  '',
+  '## Routine',
+  EDITED,
+  'What seems to work, roughly in order of how much it helps.',
+  '',
+  '### Evening',
+  EDITED,
+  '- **No screens** after 10pm',
+  '- [x] Blackout curtains',
+  '- [ ] Try magnesium for two weeks',
+  '',
+  '### Morning',
+  'Up at 7, daylight within the first hour. See [why light matters](https://example.com/light).',
+  '',
+  '## What the doctor said',
+  '> Sleep apnea is unlikely; keep a diary for a month.',
+  '',
+  '### Sleep diary',
+  'Bed 23:10, up 07:05, woke twice.',
+].join('\n')
+
+frame = await open(DEMO)
+await check('opening an existing notebook saves nothing', async () => {
+  await wait(600)
+  assert.equal(await saveCount(), 0)
+})
+
+await check('wide screens show the tree beside the page', async () => {
+  assert.ok(await frame.$('.nb-tree'))
+  await frame.evaluate(() => [...document.querySelectorAll('.nb-tree-link')].find((b) => b.textContent === 'Routine').click())
+  assert.equal(await text(frame, '.nb-page .nb-title'), 'Routine')
+  assert.deepEqual(
+    await frame.$$eval('.nb-tree-link', (els) => els.map((el) => el.textContent)),
+    ['Unsorted', 'Routine', 'Evening', 'Morning', 'What the doctor said'],
+    'the open section expands in the tree',
+  )
+  await openRow(frame, 'Evening')
+  await page.screenshot({ path: join(SHOTS_DIR, 'notebook-wide.png') })
+})
+
+await check('a locked notebook can be read and searched, but not changed', async () => {
+  const before = await saveCount()
+  await hostFrame().evaluate(() =>
+    harness.pushItem({
+      ...harness.notes.a,
+      content: { ...harness.notes.a.content, appData: { 'org.standardnotes.sn': { locked: true } } },
+    }),
+  )
+  await wait(200)
+  assert.equal(await frame.$eval('.md input[type="checkbox"]', (el) => el.disabled), true)
+  assert.equal(await frame.$eval('.nb-search', (el) => el.disabled), false)
+  assert.equal(await frame.$eval('.crumb', (el) => el.disabled), false)
+  assert.equal(await frame.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent === 'Edit').disabled), true)
+  await wait(600)
+  assert.equal(await saveCount(), before)
+})
+
+await page.setViewport({ width: 380, height: 1200 })
+frame = await open(DEMO, '&w=360')
+await check('phones get one column, without the tree', async () => {
+  assert.equal(await frame.$('.nb-tree'), null)
+  assert.equal(await frame.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), 0)
+  await page.screenshot({ path: join(SHOTS_DIR, 'notebook-narrow.png') })
+  await openRow(frame, 'Routine')
+  await openRow(frame, 'Evening')
+  await page.screenshot({ path: join(SHOTS_DIR, 'notebook-narrow-section.png') })
+})
+
+await page.setViewport({ width: 1000, height: 1200 })
+frame = await open(DEMO, '&dark')
+await check('dark theme applies', async () => {
+  assert.equal(await frame.$eval('body', (el) => getComputedStyle(el).backgroundColor), 'rgb(29, 30, 34)')
+  await openRow(frame, 'Routine')
+  await page.screenshot({ path: join(SHOTS_DIR, 'notebook-dark.png') })
+})
+
+frame = await open(DEMO, 'mobile')
+await check('Android replay: reads and saves through an opaque-origin host', async () => {
+  await frame.click('[data-focus="thought"]')
+  await page.keyboard.type('Thought from my phone')
+  await page.keyboard.press('Enter')
+  await wait(900)
+  const sandboxedHost = page.frames().find((candidate) => candidate.url().startsWith(`${HOST}/index.html`))
+  assert.match(await sandboxedHost.evaluate(() => harness.notes.a.content.text), /## Unsorted\n\n### Thought from my phone/)
+})
+
+await check('no errors in the console', async () => {
+  assert.deepEqual(
+    errors.filter((line) => !line.includes('/favicon.ico') && !line.includes('status of 404 (Not Found)')),
+    [],
+  )
+})
+
+await browser.close()
+console.log(results.join('\n'))
+process.exitCode = results.some((line) => line.startsWith('FAIL')) ? 1 : 0
