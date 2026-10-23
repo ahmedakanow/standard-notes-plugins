@@ -4,20 +4,26 @@ import { insertLink, prefixLines, wrap } from './editing.js'
 import { plainPreview, renderMarkdown } from './markdown.js'
 import {
   MAX_DEPTH,
+  addEntry,
   addSection,
   addThought,
   countInside,
   deleteSection,
+  entryTargets,
+  entryToSection,
   findUnsorted,
   locate,
+  moveEntry,
+  moveEntryByOne,
   moveSection,
   moveSectionByOne,
   moveTargets,
   pathTo,
+  removeEntry,
   renameSection,
   reorderSection,
   searchNotebook,
-  setSectionText,
+  setEntryText,
   toggleCheck,
 } from './notebook.js'
 
@@ -33,7 +39,13 @@ const WIDE = '(min-width: 760px)'
 export function mountNotebook(root, session) {
   const ui = {
     current: null, // id of the open section, or null for the top level
-    editing: null, // id of the section whose text is open for editing, or 'intro'
+    editing: null, // id of the entry open for editing, or 'intro'
+    entryMenu: null, // id of the entry whose ⋯ menu is open
+    movingEntry: null, // id of the entry choosing where to move (or to file, from Unsorted)
+    confirmEntryDelete: null,
+    addingEntry: null, // id of the section with its Add entry box open
+    entryDraft: '',
+    scrollTo: null, // entry to bring into view after opening a search result
     query: '',
     highlight: '', // search term to mark in the section opened from a result
     arranging: false, // the contents list shows drag handles and menus instead of reading view
@@ -79,7 +91,7 @@ export function mountNotebook(root, session) {
 
   const rootTitle = () => session.title || 'Notebook'
 
-  function open(id, { highlight = '' } = {}) {
+  function open(id, { highlight = '', entryId = null } = {}) {
     Object.assign(ui, {
       current: id,
       editing: null,
@@ -88,10 +100,15 @@ export function mountNotebook(root, session) {
       moving: null,
       renaming: null,
       adding: null,
+      entryMenu: null,
+      movingEntry: null,
+      addingEntry: null,
       highlight,
     })
     render()
-    document.scrollingElement.scrollTop = 0
+    const match = entryId && root.querySelector(`[data-entry="${entryId}"]`)
+    if (match) match.scrollIntoView({ block: 'center' })
+    else document.scrollingElement.scrollTop = 0
   }
 
   function render() {
@@ -195,7 +212,7 @@ export function mountNotebook(root, session) {
                 onclick: () => {
                   const term = ui.query.trim()
                   ui.query = ''
-                  open(result.id, { highlight: term })
+                  open(result.id, { highlight: term, entryId: result.entryId })
                 },
               },
               h('span', { class: 'nb-row-title' }, mark(result.title, ui.query)),
@@ -285,8 +302,217 @@ export function mountNotebook(root, session) {
       section.edited && h('p', { class: 'meta nb-edited' }, `Edited ${shortDate(section.edited, ctx.today)}`),
       ui.menu === section.id && sectionMenu(section, depth, ctx),
       ui.moving === section.id && movePicker(section),
-      textBlock(section.id, section.text, ctx),
-      contentsBlock(section.id, section.children, depth < MAX_DEPTH, ctx),
+      section.entries.length > 0 &&
+        h(
+          'div',
+          { class: 'nb-entries' },
+          section.entries.map((entry, index) => entryBlock(entry, index, section, depth, ctx)),
+        ),
+      contentsBlock(section.id, section.children, false, ctx),
+      addRow(section, depth, ctx),
+    )
+  }
+
+  const firstWords = (entry) => plainPreview(entry.text, 40) || 'this entry'
+
+  function entryBlock(entry, index, section, depth, ctx) {
+    const editing = ui.editing === entry.id
+    return h(
+      'article',
+      { class: 'nb-entry', 'data-entry': entry.id, 'aria-label': `Entry: ${firstWords(entry)}` },
+      editing
+        ? editor(entry.id, entry.text, ctx)
+        : h(
+            'div',
+            { class: 'md' },
+            renderMarkdown(entry.text).map((node) => toDom(node, entry.id)),
+          ),
+      !editing &&
+        h(
+          'div',
+          { class: 'nb-entry-foot' },
+          entry.added && h('span', { class: 'nb-added' }, `Added ${shortDate(entry.added, ctx.today)}`),
+          h('button', { type: 'button', class: 'text-button', onclick: () => startEditing(entry.id) }, 'Edit'),
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'icon-button',
+              'aria-label': `More actions for "${firstWords(entry)}"`,
+              'aria-expanded': String(ui.entryMenu === entry.id),
+              onclick: () => {
+                ui.entryMenu = ui.entryMenu === entry.id ? null : entry.id
+                ui.movingEntry = null
+                ui.confirmEntryDelete = null
+                render()
+              },
+            },
+            '⋯',
+          ),
+        ),
+      ui.entryMenu === entry.id && entryMenu(entry, index, section, depth, ctx),
+      ui.movingEntry === entry.id && entryPicker(entry, section, ctx),
+    )
+  }
+
+  function entryMenu(entry, index, section, depth, ctx) {
+    const confirming = ui.confirmEntryDelete === entry.id
+    const inUnsorted = section === findUnsorted(session.model)
+    const button = (text, onclick, props = {}) => h('button', { type: 'button', class: 'button', onclick, ...props }, text)
+    return h(
+      'div',
+      { class: 'button-row nb-menu' },
+      button('Move up', () => moveEntryByOne(session.model, entry.id, -1) && commit(), { 'data-disabled': index === 0 }),
+      button('Move down', () => moveEntryByOne(session.model, entry.id, 1) && commit(), {
+        'data-disabled': index === section.entries.length - 1,
+      }),
+      button(inUnsorted ? 'File…' : 'Move to…', () => {
+        ui.movingEntry = ui.movingEntry === entry.id ? null : entry.id
+        render()
+      }),
+      button(
+        'Make it a section',
+        () => {
+          if (!entryToSection(session.model, entry.id, ctx.today)) return
+          ui.entryMenu = null
+          commit()
+        },
+        { 'data-disabled': !inUnsorted && depth >= MAX_DEPTH },
+      ),
+      button(
+        confirming ? 'Tap again to delete' : 'Delete',
+        () => {
+          if (!confirming) {
+            ui.confirmEntryDelete = entry.id
+            render()
+            setTimeout(() => {
+              if (ui.confirmEntryDelete !== entry.id) return
+              ui.confirmEntryDelete = null
+              render()
+            }, DELETE_CONFIRM_MS)
+            return
+          }
+          removeEntry(session.model, entry.id, ctx.today)
+          ui.entryMenu = null
+          ui.confirmEntryDelete = null
+          commit()
+        },
+        { class: `button danger${confirming ? ' is-confirming' : ''}` },
+      ),
+    )
+  }
+
+  function entryPicker(entry, section, ctx) {
+    const filing = section === findUnsorted(session.model)
+    return picker({
+      prompt: filing ? `File "${firstWords(entry)}" under:` : 'Move this entry to:',
+      empty: 'There is no other section yet. Add one first.',
+      targets: entryTargets(session.model, entry.id),
+      onPick: (target) => {
+        moveEntry(session.model, entry.id, target.id, ctx.today)
+        ui.movingEntry = null
+        ui.entryMenu = null
+        commit()
+      },
+      onCancel: () => {
+        ui.movingEntry = null
+        render()
+      },
+    })
+  }
+
+  /** A list of sections to choose from, indented by depth. */
+  function picker({ prompt, empty, targets, onPick, onCancel }) {
+    return h(
+      'div',
+      { class: 'nb-move' },
+      h('p', { class: 'meta' }, targets.length ? prompt : empty),
+      h(
+        'ul',
+        { class: 'nb-move-list' },
+        targets.map((target) =>
+          h(
+            'li',
+            {},
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'nb-move-target',
+                style: `padding-left: ${0.75 + target.depth}rem`,
+                onclick: () => onPick(target),
+              },
+              target.id === null ? 'Top level' : target.title,
+            ),
+          ),
+        ),
+      ),
+      h('button', { type: 'button', class: 'text-button', onclick: onCancel }, 'Cancel'),
+    )
+  }
+
+  /** Add entry and Add section, side by side at the foot of a section. */
+  function addRow(section, depth, ctx) {
+    if (ui.addingEntry === section.id) return entryAddForm(section, ctx)
+    if (ui.adding === section.id) return addControl(section.id, ctx)
+    return h(
+      'div',
+      { class: 'nb-add-row' },
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'text-button',
+          onclick: () => {
+            Object.assign(ui, { addingEntry: section.id, adding: null, entryDraft: '', focusTarget: `entry-${section.id}` })
+            render()
+          },
+        },
+        '+ Add entry',
+      ),
+      depth < MAX_DEPTH && addControl(section.id, ctx),
+    )
+  }
+
+  function entryAddForm(section, ctx) {
+    const add = () => {
+      if (!addEntry(session.model, section.id, ui.entryDraft, ctx.today)) return
+      ui.addingEntry = null
+      ui.entryDraft = ''
+      commit()
+    }
+    return h(
+      'div',
+      { class: 'nb-add' },
+      h('textarea', {
+        class: 'add-input',
+        rows: 4,
+        placeholder: 'Write or paste. It stays one entry, however long.',
+        'aria-label': 'New entry',
+        value: ui.entryDraft,
+        'data-focus': `entry-${section.id}`,
+        oninput: (event) => {
+          ui.entryDraft = event.target.value
+          autosize(event.target)
+        },
+      }),
+      h(
+        'div',
+        { class: 'button-row' },
+        h('button', { type: 'button', class: 'button primary', onclick: add }, 'Add entry'),
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'text-button',
+            onclick: () => {
+              ui.addingEntry = null
+              render()
+            },
+          },
+          'Cancel',
+        ),
+      ),
     )
   }
 
@@ -306,44 +532,61 @@ export function mountNotebook(root, session) {
             'Add an introduction',
           ),
       thoughtBox(ctx),
-      unsorted && unsorted.children.length > 0 && unsortedBlock(unsorted),
+      unsorted && unsorted.entries.length + unsorted.children.length > 0 && unsortedBlock(unsorted, ctx),
       contentsBlock(null, sections, true, ctx),
     )
   }
 
   /** Loose thoughts, each with a File button that opens the move picker. */
-  function unsortedBlock(unsorted) {
+  /**
+   * Loose thoughts, each with a File button. Thoughts are entries; older ones written as
+   * small sections are listed too and file the same way.
+   */
+  function unsortedBlock(unsorted, ctx) {
+    const slip = (label, isOpen, toggle, picker) =>
+      h(
+        'li',
+        { class: 'nb-slip' },
+        h('button', { type: 'button', class: 'nb-slip-open', 'data-always': '', onclick: () => open(unsorted.id) }, label),
+        h(
+          'button',
+          { type: 'button', class: 'text-button', 'aria-expanded': String(isOpen), 'aria-label': `File ${label}`, onclick: toggle },
+          'File',
+        ),
+        isOpen && picker,
+      )
     return h(
       'section',
       { class: 'nb-unsorted', 'aria-label': 'Unsorted' },
-      h('h2', { class: 'nb-label' }, 'Unsorted ', h('span', { class: 'nb-count' }, String(unsorted.children.length))),
+      h(
+        'h2',
+        { class: 'nb-label' },
+        'Unsorted ',
+        h('span', { class: 'nb-count' }, String(unsorted.entries.length + unsorted.children.length)),
+      ),
       h(
         'ul',
         { class: 'nb-slips' },
+        unsorted.entries.map((entry) =>
+          slip(
+            firstWords(entry),
+            ui.movingEntry === entry.id,
+            () => {
+              ui.movingEntry = ui.movingEntry === entry.id ? null : entry.id
+              render()
+            },
+            entryPicker(entry, unsorted, ctx),
+          ),
+        ),
         unsorted.children.map((thought) =>
-          h(
-            'li',
-            { class: 'nb-slip' },
-            h(
-              'button',
-              { type: 'button', class: 'nb-slip-open', 'data-always': '', onclick: () => open(thought.id) },
-              thought.title,
-            ),
-            h(
-              'button',
-              {
-                type: 'button',
-                class: 'text-button',
-                'aria-expanded': String(ui.moving === thought.id),
-                'aria-label': `File ${thought.title}`,
-                onclick: () => {
-                  ui.moving = ui.moving === thought.id ? null : thought.id
-                  render()
-                },
-              },
-              'File',
-            ),
-            ui.moving === thought.id && movePicker(thought),
+          slip(
+            thought.title,
+            ui.moving === thought.id,
+            () => {
+              ui.moving = ui.moving === thought.id ? null : thought.id
+              render()
+            },
+            movePicker(thought),
           ),
         ),
       ),
@@ -355,6 +598,7 @@ export function mountNotebook(root, session) {
    * the sections inside them indented underneath. Arrange swaps it for handles and menus.
    */
   function contentsBlock(parentId, sections, canAdd, ctx) {
+    if (sections.length === 0 && parentId !== null && !canAdd) return null
     const arranging = ui.arranging && sections.length > 0
     return h(
       'section',
@@ -390,7 +634,8 @@ export function mountNotebook(root, session) {
   }
 
   function tocEntry(section, level, ctx) {
-    const preview = level === 1 && plainPreview(section.text)
+    const preview = level === 1 && plainPreview(section.entries[0]?.text ?? '')
+    const entries = section.entries.length
     const deeper = level === 2 ? countInside(section) : 0
     return h(
       'li',
@@ -404,7 +649,13 @@ export function mountNotebook(root, session) {
           h('span', { class: 'toc-meta' }, shortDate(section.edited, ctx.today)),
         ],
       ),
-      preview && h('p', { class: 'toc-preview' }, preview),
+      preview &&
+        h(
+          'p',
+          { class: 'toc-preview' },
+          h('span', { class: 'toc-preview-text' }, preview),
+          entries > 1 && h('span', { class: 'toc-count' }, `${entries} entries`),
+        ),
       level === 1 &&
         section.children.length > 0 &&
         h(
@@ -450,17 +701,18 @@ export function mountNotebook(root, session) {
     )
   }
 
+  /** Edits the introduction ('intro') or an entry (its id). */
   function editor(key, text, ctx) {
     const update = (value) => {
       if (key === 'intro') session.model.intro = value
-      else setSectionText(session.model, key, value, ctx.today)
+      else setEntryText(session.model, key, value, ctx.today)
       saveSoon()
     }
     const textarea = h('textarea', {
       class: 'nb-editor',
       rows: 6,
       value: text,
-      'aria-label': key === 'intro' ? 'Introduction' : 'Section text',
+      'aria-label': key === 'intro' ? 'Introduction' : 'Entry text',
       'data-focus': `edit-${key}`,
       oninput: (event) => {
         autosize(event.target)
@@ -509,6 +761,8 @@ export function mountNotebook(root, session) {
             type: 'button',
             class: 'button primary',
             onclick: () => {
+              // An entry emptied completely is removed rather than kept blank.
+              if (key !== 'intro' && !textarea.value.trim()) removeEntry(session.model, key, ctx.today)
               ui.editing = null
               commit()
             },
@@ -612,51 +866,22 @@ export function mountNotebook(root, session) {
   }
 
   function movePicker(section) {
-    const targets = moveTargets(session.model, section.id)
     const filing = locate(session.model, section.id)?.parent === findUnsorted(session.model)
-    const prompt = filing ? `File "${section.title}" under:` : `Move "${section.title}" into:`
-    return h(
-      'div',
-      { class: 'nb-move' },
-      h('p', { class: 'meta' }, targets.length ? prompt : 'There is nowhere else this section fits.'),
-      h(
-        'ul',
-        { class: 'nb-move-list' },
-        targets.map((target) =>
-          h(
-            'li',
-            {},
-            h(
-              'button',
-              {
-                type: 'button',
-                class: 'nb-move-target',
-                style: `padding-left: ${0.75 + target.depth}rem`,
-                onclick: () => {
-                  moveSection(session.model, section.id, target.id)
-                  ui.moving = null
-                  ui.menu = null
-                  commit()
-                },
-              },
-              target.id === null ? 'Top level' : target.title,
-            ),
-          ),
-        ),
-      ),
-      h(
-        'button',
-        {
-          type: 'button',
-          class: 'text-button',
-          onclick: () => {
-            ui.moving = null
-            render()
-          },
-        },
-        'Cancel',
-      ),
-    )
+    return picker({
+      prompt: filing ? `File "${section.title}" under:` : `Move "${section.title}" into:`,
+      empty: 'There is nowhere else this section fits.',
+      targets: moveTargets(session.model, section.id),
+      onPick: (target) => {
+        moveSection(session.model, section.id, target.id)
+        ui.moving = null
+        ui.menu = null
+        commit()
+      },
+      onCancel: () => {
+        ui.moving = null
+        render()
+      },
+    })
   }
 
   function renameInput(section, ctx) {
@@ -698,7 +923,7 @@ export function mountNotebook(root, session) {
           type: 'button',
           class: 'text-button',
           onclick: () => {
-            Object.assign(ui, { adding: key, addDraft: '', focusTarget: `add-${key}` })
+            Object.assign(ui, { adding: key, addingEntry: null, addDraft: '', focusTarget: `add-${key}` })
             render()
           },
         },
