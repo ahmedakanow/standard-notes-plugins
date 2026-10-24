@@ -139,6 +139,8 @@ const INLINE = [
   { pattern: /\[([^\]]+)\]\(([^)\s]+)[^)]*\)/y, make: (m) => link(m[2], inline(m[1])) },
   { pattern: /(\*\*|__)(?=\S)([\s\S]*?\S)\1/y, make: (m) => ({ tag: 'strong', children: inline(m[2]) }) },
   { pattern: /~~(?=\S)([\s\S]*?\S)~~/y, make: (m) => ({ tag: 'del', children: inline(m[1]) }) },
+  // Markdown has no underline; `<u>` is the one bit of HTML read, and only as this pair.
+  { pattern: /<u>([\s\S]+?)<\/u>/iy, make: (m) => ({ tag: 'u', children: inline(m[1]) }) },
   {
     pattern: /([*_])(?=\S)([\s\S]*?\S)\1(?![*_\w])/y,
     make: (m) => ({ tag: 'em', children: inline(m[2]) }),
@@ -183,7 +185,7 @@ export function plainPreview(text, length = 90) {
     .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, '')
     .replace(/^\s*>\s?/, '')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[*_~`]+/g, '')
+    .replace(/[*_~`]+|<\/?u>/gi, '')
     .replace(/^\\?#+\s+/, '')
     .trim()
   return plain.length > length ? `${plain.slice(0, length - 1).trimEnd()}…` : plain

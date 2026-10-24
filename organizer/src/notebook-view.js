@@ -736,6 +736,7 @@ export function mountNotebook(root, session) {
         { class: 'nb-toolbar', role: 'toolbar', 'aria-label': 'Formatting' },
         tool('B', 'Bold', (state) => wrap(state, '**')),
         tool('I', 'Italic', (state) => wrap(state, '_')),
+        tool('U', 'Underline', (state) => wrap(state, '<u>', '</u>')),
         tool('•', 'Bulleted list', (state) => prefixLines(state, '- ')),
         tool('☐', 'Checklist', (state) => prefixLines(state, '- [ ] ')),
         tool('🔗', 'Link', insertLink),

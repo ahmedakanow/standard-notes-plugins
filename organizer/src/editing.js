@@ -1,11 +1,14 @@
 // The Notebook editor's toolbar. Each action takes a textarea's { value, start, end } and
 // returns the new { value, start, end }, so they can be tested without a browser.
 
-/** Wraps the selection in a marker such as `**`, selecting the wrapped text. */
-export function wrap({ value, start, end }, marker) {
+/**
+ * Wraps the selection in a marker such as `**` (or a pair such as `<u>` and `</u>`),
+ * selecting the wrapped text.
+ */
+export function wrap({ value, start, end }, marker, closing = marker) {
   const selected = value.slice(start, end) || 'text'
   return {
-    value: `${value.slice(0, start)}${marker}${selected}${marker}${value.slice(end)}`,
+    value: `${value.slice(0, start)}${marker}${selected}${closing}${value.slice(end)}`,
     start: start + marker.length,
     end: start + marker.length + selected.length,
   }

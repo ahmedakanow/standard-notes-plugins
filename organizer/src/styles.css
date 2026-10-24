@@ -1335,6 +1335,12 @@ h1 {
   font-weight: 400;
 }
 
+.tool[aria-label='Underline'] {
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 .md {
   max-width: var(--measure);
   font-family: var(--serif);
