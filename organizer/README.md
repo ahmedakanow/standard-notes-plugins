@@ -48,37 +48,40 @@ Any `## Heading` other than Parked and Done is a group, so typing one on your ph
 
 Everything about one topic, such as Health, a project or a trip, in one note, organized like folders. Instead of a dozen scattered notes you can't find again, you get one place where you can see everything at a glance.
 
-- **Contents first:** a notebook opens like a book's contents page. Each section's name has a dotted leader to when it was last edited, the first line of its text underneath (with "3 entries" when it holds several), and the sections inside it indented below, so two levels show at once.
-- **Sections** have a name, their own text, and sections inside them, up to five levels deep. Tap one to open it; the trail at the top ("Health › Sleep") takes you back. On a wide screen the whole tree stays on the left.
-- **Entries:** a section's text can be several separate pieces that aren't sections themselves, such as one finding per day. **+ Add entry** at the foot of a section adds one, dated today; pasting a long note keeps it as one entry, and any headings in it become bold lines. Each entry has its own **Edit** and a **⋯** menu to move it up or down, move it to another section or the front page, turn it into a section of its own, or delete it (two taps). Emptying an entry and pressing Done removes it.
-- **Bring notes in** with **+ Add a section inside** (or **+ Add section** on the contents page): paste a whole note and its first line becomes the section's name, the rest its text, and any headings in it become sections inside. Then archive the original note.
-- **The front page** holds entries too: your introduction, then anything typed into **Add a thought**, each added at the end, above the contents. Use an entry's **Move to…** to put it in a section later, or **Make it a section**. (Notes from before 0.9.0 kept thoughts in an **Unsorted** section; it's merged onto the front page, oldest first, the first time you open the note.)
-- **Reading** shows your text formatted: bold, italics, lists, checklists you can tick, links, quotes and code. Images show as links instead of loading. **Edit** opens the text with a small toolbar (bold, italic, list, checklist, link).
-- **Organizing:** an open section's **⋯** menu renames, adds a section inside, moves (only to places it fits) or deletes it, which takes two taps. To work on a whole list, tap **Arrange** above its contents: each section gets a **⠿** handle to drag (or arrow keys) and its own **⋯** menu.
-- **Search** covers every section's name and entries, and the front page's entries. Name matches come first, and opening a result scrolls to the entry and highlights the match.
-- Each section shows when it was last edited, which includes editing any of its entries. Typing saves after a two-second pause, because every save re-uploads the whole note; keep a notebook to one topic, well under a megabyte.
+- **Folders and files:** a notebook starts blank, with **+ Add entry** and **+ Add section** at the top. Sections are like folders and entries like files: both just need a name. A section holds entries and sections of its own, up to four levels deep, and has the same two buttons at its top. An entry holds text, if you want to add any.
+- **Contents:** every page lists its sections first, then its entries, like a book's contents page. Each name has a dotted leader to when it was last edited; a section shows what's inside it indented underneath, and an entry the first line of its text. There's no title on the front page, since Standard Notes already shows the note's name. Tap a section to go into it, or an entry to open it; the trail at the top ("Health › Sleep") takes you back. On a wide screen the whole tree stays on the left.
+- **Reading an entry** shows its text formatted: bold, italics, lists, checklists you can tick, links, quotes and code. Images show as links instead of loading. **Edit** (or **Add text**) opens the text with a small toolbar (bold, italic, list, checklist, link).
+- **Bring notes in** by adding an entry, opening it and pasting the note's text; it stays exactly as it was. Then archive the original note.
+- **Organizing:** an open section's or entry's **⋯** menu renames, moves (sections only to places they fit) or deletes it, which takes two taps. To work on a whole list, tap **Arrange** above its contents: each section and entry gets a **⠿** handle to drag (or arrow keys) and its own **⋯** menu.
+- **Search** covers every name and every entry's text. Name matches come first, and opening a result highlights the match.
+- Sections and entries show when they were last edited; changing an entry counts for the section it's in. Typing saves after a two-second pause, because every save re-uploads the whole note; keep a notebook to one topic, well under a megabyte.
 
 In the plain editor a Notebook note looks like this:
 
 ```markdown
 <!-- organizer: notebook -->
-Everything about sleeping better.
 
-<!-- entry 2026-10-23 -->
-Ask Sam which sleep app he uses
+## Health
+<!-- edited 2026-10-24 -->
 
-## Routine
-<!-- edited 2026-10-22 -->
-What seems to work.
+### Sleep
+<!-- edited 2026-10-24 -->
 
-<!-- entry 2026-10-22 -->
-No caffeine after noon: fell asleep sooner.
-
-### Evening
+#### Evening routine
+<!-- entry 2026-10-24 -->
 - [x] Blackout curtains
+
+### Doctor visit
+<!-- entry 2026-10-20 -->
+Keep a sleep diary for a month.
+
+## Ask Sam which sleep app he uses
+<!-- entry 2026-10-23 -->
 ```
 
-`##` is the top level and `######` the fifth. Text before the first heading is the front page's entries. Each `<!-- entry DATE -->` line starts a new entry; text before the first one is the first entry, so a note written before entries existed reads exactly as it did. A `---` line is an ordinary divider inside an entry. The `edited` and `entry` lines are hidden in formatted views. Text that would read as a heading is saved as `\## …` so it stays text.
+Both sections and entries are headings: `##` is the top level, and an entry's heading is followed by a hidden `<!-- entry DATE -->` line (a section's by `<!-- edited DATE -->`). Each section lists its sections first, then its entries. Sections go four levels deep (`#####`), so their entries fit in `######`. The hidden lines don't show in formatted views, and text that would read as a heading is saved as `\## …` so it stays text.
+
+Notebooks from before 0.10.0, where entries had no names, are converted the first time you open them: each piece of text becomes an entry named after its first line, with the whole text kept inside, and any fifth-level section becomes an entry.
 
 Your writing (names, text, the contents) is set in [Alegreya](https://github.com/huertatipografica/Alegreya), a book typeface, while buttons and labels keep your Standard Notes theme's font. The font files are in `fonts/` under the SIL Open Font License and load from this site, never a font service. Colors all come from your theme.
 

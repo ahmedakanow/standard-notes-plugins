@@ -1,5 +1,5 @@
 import { mountNotebook } from './notebook-view.js'
-import { mergeUnsorted, parseNotebook, previewNotebook, serializeNotebook } from './notebook.js'
+import { parseNotebook, previewNotebook, serializeNotebook, takeUpgraded } from './notebook.js'
 import { mountTodos } from './todos-view.js'
 import { normalizeTodos, parseTodos, previewTodos, serializeTodos } from './todos.js'
 
@@ -24,7 +24,7 @@ export const TEMPLATES = [
     icon: '📓',
     blurb: 'One topic, organized into sections you can browse.',
     parse: (body) => parseNotebook(body),
-    refresh: (model) => mergeUnsorted(model),
+    refresh: (model) => takeUpgraded(model),
     serialize: (model) => serializeNotebook(model),
     preview: (model, ctx) => previewNotebook(model, ctx.today),
     mount: mountNotebook,

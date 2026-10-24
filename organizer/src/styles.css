@@ -949,6 +949,10 @@ h1 {
   color: var(--fg);
 }
 
+.nb-tree-link.is-entry {
+  font-style: italic;
+}
+
 .is-current > .nb-tree-link,
 .nb-tree-root.is-current {
   color: var(--accent);
@@ -1020,43 +1024,6 @@ h1 {
   margin-top: -1rem;
 }
 
-/* Adding a thought on the front page */
-
-.nb-thought {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 0.5rem;
-}
-
-/* A ruled line to write on, not a form box. */
-.nb-thought .add-input {
-  flex: 1 1 14rem;
-  min-height: 0;
-  font-family: var(--serif);
-  font-size: 1.125rem;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--rule);
-  border-radius: 0;
-  padding: 0.375rem 0;
-}
-
-.nb-thought .add-input:focus {
-  background: transparent;
-  border-bottom-color: var(--accent);
-}
-
-.nb-thought .add-input::placeholder {
-  font-style: italic;
-}
-
-.nb-thought-add {
-  align-self: flex-end;
-  padding-bottom: 0.5rem;
-  font-size: 0.875rem;
-}
-
 /* The contents page: the memorable part */
 
 .nb-contents {
@@ -1081,10 +1048,6 @@ h1 {
   font-size: 1.1875rem;
   font-weight: 500;
   color: var(--muted);
-}
-
-.nb-contents > .text-button {
-  align-self: flex-start;
 }
 
 .toc {
@@ -1124,6 +1087,20 @@ h1 {
 
 .level-2 > .toc-entry {
   font-size: 1.0625rem;
+}
+
+/* Sections are set heavier than entries, as chapters are in a book's contents. */
+.toc-item.level-1.is-entry {
+  padding: 0.25rem 0 0.375rem;
+}
+
+.level-1.is-entry > .toc-entry {
+  font-size: 1.125rem;
+  font-weight: 400;
+}
+
+.level-2.is-section > .toc-entry {
+  font-weight: 600;
 }
 
 .toc-title {
@@ -1175,13 +1152,6 @@ h1 {
   white-space: nowrap;
 }
 
-.toc-count {
-  flex: none;
-  margin-left: auto;
-  font-size: 0.875rem;
-  font-variant-numeric: oldstyle-nums;
-}
-
 .toc-more {
   font-size: 0.9375rem;
 }
@@ -1229,6 +1199,10 @@ h1 {
   font-size: 1.125rem;
   font-weight: 700;
   overflow-wrap: anywhere;
+}
+
+.nb-row-title.is-entry {
+  font-weight: 400;
 }
 
 .nb-open:hover .nb-row-title {
@@ -1292,52 +1266,16 @@ h1 {
   align-self: flex-start;
 }
 
-/* Reading and editing entries, one after another */
+/* Reading and editing an entry, and adding things */
 
-.nb-entries {
+.nb-text {
   display: flex;
   flex-direction: column;
+  gap: 0.5rem;
 }
 
-.nb-entry {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  padding: 1.25rem 0;
-}
-
-.nb-entry:first-child {
-  padding-top: 0;
-}
-
-/* A short rule between entries, like a break between notes on a page. */
-.nb-entry + .nb-entry {
-  border-top: 1px solid var(--rule);
-  max-width: var(--measure);
-}
-
-.nb-entry-foot {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.nb-added {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 0.9375rem;
-  color: var(--muted);
-  font-variant-numeric: oldstyle-nums;
-}
-
-.nb-entry-foot .icon-button {
-  width: 2rem;
-  height: 2rem;
-}
-
-.nb-entry .nb-menu,
-.nb-entry .nb-move {
-  padding: 0.25rem 0 0;
+.nb-text > .text-button {
+  align-self: flex-start;
 }
 
 .nb-add-row {
@@ -1354,7 +1292,7 @@ h1 {
   max-width: var(--measure);
 }
 
-.nb-add .add-input {
+.nb-add .field {
   width: 100%;
 }
 

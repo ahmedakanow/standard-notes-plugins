@@ -9,8 +9,8 @@ import {
   countInside,
   deleteSection,
   entryTargets,
-  entryToSection,
   locate,
+  locateEntry,
   moveEntry,
   moveEntryByOne,
   moveSection,
@@ -18,7 +18,9 @@ import {
   moveTargets,
   pathTo,
   removeEntry,
+  renameEntry,
   renameSection,
+  reorderEntry,
   reorderSection,
   searchNotebook,
   setEntryText,
@@ -32,29 +34,23 @@ const WIDE = '(min-width: 760px)'
 
 /**
  * Renders a Notebook note into `root`. `session` gives the model, the note's title, the
- * context ({ today }), whether the note is read-only, and `save()`.
+ * context ({ today }), whether the note is read-only, and `save()`. Sections and entries
+ * share one id space, so `ui` refers to either by id.
  */
 export function mountNotebook(root, session) {
   const ui = {
-    current: null, // id of the open section, or null for the top level
-    editing: null, // id of the entry open for editing
-    entryMenu: null, // id of the entry whose ⋯ menu is open
-    movingEntry: null, // id of the entry choosing where to move
-    confirmEntryDelete: null,
-    addingEntry: null, // id of the section with its Add entry box open
-    entryDraft: '',
-    scrollTo: null, // entry to bring into view after opening a search result
+    current: null, // id of the open section or entry, or null for the front page
+    editing: false, // the open entry's text is being edited
     query: '',
-    highlight: '', // search term to mark in the section opened from a result
-    arranging: false, // the contents list shows drag handles and menus instead of reading view
-    menu: null, // id of the section whose ⋯ menu is open
-    moving: null, // id of the section choosing where to move
+    highlight: '', // search term to mark in the entry opened from a result
+    arranging: false, // the contents show drag handles and menus instead of reading view
+    menu: null, // id of the section or entry whose ⋯ menu is open
+    moving: null, // id of the section or entry choosing where to move
     renaming: null,
     renameDraft: null,
     confirmDelete: null,
-    adding: null, // 'top' or a section id while its Add box is open
+    adding: null, // { kind: 'entry' | 'section', place: 'top' | section id } while a name box is open
     addDraft: '',
-    thought: '',
     expanded: new Set(), // sections opened in the side tree
     focusTarget: null, // data-focus key to focus after the next render
   }
@@ -89,22 +85,28 @@ export function mountNotebook(root, session) {
 
   const rootTitle = () => session.title || 'Notebook'
 
-  function open(id, { highlight = '', entryId = null } = {}) {
+  /** What `id` is: { kind: 'section', section, parent, depth, … } or { kind: 'entry', entry, section, … }. */
+  function find(id) {
+    const place = locate(session.model, id)
+    if (place) return { kind: 'section', ...place }
+    const found = locateEntry(session.model, id)
+    return found && { kind: 'entry', ...found }
+  }
+
+  function open(id, { highlight = '' } = {}) {
     Object.assign(ui, {
       current: id,
-      editing: null,
+      editing: false,
       arranging: false,
       menu: null,
       moving: null,
       renaming: null,
+      confirmDelete: null,
       adding: null,
-      entryMenu: null,
-      movingEntry: null,
-      addingEntry: null,
       highlight,
     })
     render()
-    const match = entryId && root.querySelector(`[data-entry="${entryId}"]`)
+    const match = highlight && root.querySelector('.nb-page mark')
     if (match) match.scrollIntoView({ block: 'center' })
     else document.scrollingElement.scrollTop = 0
   }
@@ -113,7 +115,7 @@ export function mountNotebook(root, session) {
     if (!root.contains(body)) return // another note or template has replaced this view
     const focus = captureFocus(root)
     const ctx = session.context()
-    if (ui.current !== null && !locate(session.model, ui.current)) ui.current = null
+    if (ui.current !== null && !find(ui.current)) ui.current = null
     const main = ui.query.trim() ? searchResults() : pagePane(ctx)
     rendering = true
     body.replaceChildren(topBar(), wide.matches ? h('div', { class: 'nb-columns' }, treePane(), main) : main)
@@ -147,7 +149,7 @@ export function mountNotebook(root, session) {
   }
 
   /** Builds DOM from renderMarkdown's tree. Text only ever goes in as text, never as HTML. */
-  function toDom(node, key) {
+  function toDom(node, entryId) {
     if (typeof node === 'string') return mark(node, ui.highlight)
     const props = { ...node.props }
     if (node.tag === 'input') {
@@ -156,12 +158,12 @@ export function mountNotebook(root, session) {
       if (props.dataset) {
         const n = Number(props.dataset.check)
         props.onchange = () => {
-          toggleCheck(session.model, key, n, session.context().today)
+          toggleCheck(session.model, entryId, n, session.context().today)
           commit()
         }
       }
     }
-    const children = (node.children ?? []).map((child) => toDom(child, key))
+    const children = (node.children ?? []).map((child) => toDom(child, entryId))
     // The whole checklist line ticks the box, which is easier to hit on a phone.
     if (node.tag === 'li' && props.class === 'md-check') return h('li', props, h('label', {}, children))
     return h(node.tag, props, children)
@@ -210,10 +212,10 @@ export function mountNotebook(root, session) {
                 onclick: () => {
                   const term = ui.query.trim()
                   ui.query = ''
-                  open(result.id, { highlight: term, entryId: result.entryId })
+                  open(result.id, { highlight: term })
                 },
               },
-              h('span', { class: 'nb-row-title' }, result.title === null ? rootTitle() : mark(result.title, ui.query)),
+              h('span', { class: `nb-row-title is-${result.kind}` }, mark(result.title, ui.query)),
               result.path.length > 0 && h('span', { class: 'meta' }, result.path.join(' › ')),
               result.snippet && h('span', { class: 'nb-preview' }, mark(result.snippet, ui.query)),
             ),
@@ -223,18 +225,44 @@ export function mountNotebook(root, session) {
     )
   }
 
+  /** On wide screens, everything in the notebook as a tree beside the page. */
   function treePane() {
-    const onPath = new Set(ui.current === null ? [] : pathTo(session.model, ui.current).map((section) => section.id))
+    const current = ui.current === null ? null : find(ui.current)
+    const sectionId = current?.section?.id ?? null // the open section, or the open entry's
+    const onPath = new Set(sectionId === null ? [] : pathTo(session.model, sectionId).map((section) => section.id))
+    const link = (item, isEntry) =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: `nb-tree-link${isEntry ? ' is-entry' : ''}`,
+          'aria-current': item.id === ui.current ? 'page' : null,
+          'data-always': '',
+          onclick: () => open(item.id),
+        },
+        item.title,
+      )
+    const leaf = (entry) =>
+      h(
+        'li',
+        {},
+        h(
+          'div',
+          { class: `nb-tree-row${entry.id === ui.current ? ' is-current' : ''}` },
+          h('span', { class: 'nb-tree-caret', 'aria-hidden': 'true' }),
+          link(entry, true),
+        ),
+      )
     const node = (section) => {
       const isOpen = ui.expanded.has(section.id) || onPath.has(section.id)
-      const hasChildren = section.children.length > 0
+      const hasInside = section.children.length + section.entries.length > 0
       return h(
         'li',
         {},
         h(
           'div',
           { class: `nb-tree-row${section.id === ui.current ? ' is-current' : ''}` },
-          hasChildren
+          hasInside
             ? h(
                 'button',
                 {
@@ -252,24 +280,14 @@ export function mountNotebook(root, session) {
                 isOpen ? '▾' : '▸',
               )
             : h('span', { class: 'nb-tree-caret', 'aria-hidden': 'true' }),
-          h(
-            'button',
-            {
-              type: 'button',
-              class: 'nb-tree-link',
-              'aria-current': section.id === ui.current ? 'page' : null,
-              'data-always': '',
-              onclick: () => open(section.id),
-            },
-            section.title,
-          ),
+          link(section, false),
         ),
-        isOpen && hasChildren && h('ul', {}, section.children.map(node)),
+        isOpen && hasInside && h('ul', {}, section.children.map(node), section.entries.map(leaf)),
       )
     }
     return h(
       'nav',
-      { class: 'nb-tree', 'aria-label': 'All sections' },
+      { class: 'nb-tree', 'aria-label': 'Everything in this notebook' },
       h(
         'button',
         {
@@ -280,120 +298,308 @@ export function mountNotebook(root, session) {
         },
         rootTitle(),
       ),
-      h('ul', {}, session.model.sections.map(node)),
+      h('ul', {}, session.model.sections.map(node), session.model.entries.map(leaf)),
     )
   }
 
   function pagePane(ctx) {
-    if (ui.current === null) return topPage(ctx)
-    const { section, depth } = locate(session.model, ui.current)
+    if (ui.current === null) return sectionPage(null, 0, ctx)
+    const found = find(ui.current)
+    return found.kind === 'entry' ? entryPage(found, ctx) : sectionPage(found.section, found.depth, ctx)
+  }
+
+  /**
+   * A section, or the front page (`section` null), which has no title: Standard Notes
+   * already shows the note's name above it. Add entry and Add section come first, then
+   * what's inside.
+   */
+  function sectionPage(section, depth, ctx) {
     return h(
       'section',
-      { class: 'nb-page', 'aria-label': section.title },
-      breadcrumb(section),
-      h(
-        'div',
-        { class: 'nb-title-row' },
-        ui.renaming === section.id ? renameInput(section, ctx) : h('h1', { class: 'nb-title' }, section.title),
-        moreButton(section),
-      ),
-      section.edited && h('p', { class: 'meta nb-edited' }, `Edited ${shortDate(section.edited, ctx.today)}`),
-      ui.menu === section.id && sectionMenu(section, depth, ctx),
-      ui.moving === section.id && movePicker(section),
-      section.entries.length > 0 &&
-        h(
-          'div',
-          { class: 'nb-entries' },
-          section.entries.map((entry, index) => entryBlock(entry, index, section, depth, ctx)),
-        ),
-      contentsBlock(section.id, section.children, false, ctx),
-      addRow(section, depth, ctx),
+      { class: 'nb-page', 'aria-label': section?.title ?? rootTitle() },
+      section && [
+        breadcrumb(pathTo(session.model, section.id).slice(0, -1)),
+        titleRow(section, ctx),
+        section.edited && h('p', { class: 'meta nb-edited' }, `Edited ${shortDate(section.edited, ctx.today)}`),
+        ui.menu === section.id && itemMenu(section, false, ctx),
+        ui.moving === section.id && movePicker(section, false, ctx),
+      ],
+      addRow(section?.id ?? null, depth, ctx),
+      contentsBlock(section ? section.children : session.model.sections, section ? section.entries : session.model.entries, ctx),
     )
   }
 
-  const firstWords = (entry) => plainPreview(entry.text, 40) || 'this entry'
-
-  /** One entry, read or edited. `section` is null for the notebook's own entries, at depth 0. */
-  function entryBlock(entry, index, section, depth, ctx) {
-    const editing = ui.editing === entry.id
+  /** An entry: its name, then its text to read, tick and edit. */
+  function entryPage({ entry, section }, ctx) {
     return h(
       'article',
-      { class: 'nb-entry', 'data-entry': entry.id, 'aria-label': `Entry: ${firstWords(entry)}` },
-      editing
-        ? editor(entry.id, entry.text, ctx)
+      { class: 'nb-page', 'aria-label': entry.title },
+      breadcrumb(section ? pathTo(session.model, section.id) : []),
+      titleRow(entry, ctx),
+      entry.edited && h('p', { class: 'meta nb-edited' }, `Edited ${shortDate(entry.edited, ctx.today)}`),
+      ui.menu === entry.id && itemMenu(entry, true, ctx),
+      ui.moving === entry.id && movePicker(entry, true, ctx),
+      ui.editing
+        ? editor(entry, ctx)
         : h(
             'div',
-            { class: 'md' },
-            renderMarkdown(entry.text).map((node) => toDom(node, entry.id)),
+            { class: 'nb-text' },
+            entry.text &&
+              h(
+                'div',
+                { class: 'md' },
+                renderMarkdown(entry.text).map((node) => toDom(node, entry.id)),
+              ),
+            h(
+              'button',
+              { type: 'button', class: 'text-button', onclick: () => startEditing(entry) },
+              entry.text ? 'Edit' : 'Add text',
+            ),
           ),
-      !editing &&
-        h(
-          'div',
-          { class: 'nb-entry-foot' },
-          entry.added && h('span', { class: 'nb-added' }, `Added ${shortDate(entry.added, ctx.today)}`),
-          h('button', { type: 'button', class: 'text-button', onclick: () => startEditing(entry.id) }, 'Edit'),
-          h(
-            'button',
-            {
-              type: 'button',
-              class: 'icon-button',
-              'aria-label': `More actions for "${firstWords(entry)}"`,
-              'aria-expanded': String(ui.entryMenu === entry.id),
-              onclick: () => {
-                ui.entryMenu = ui.entryMenu === entry.id ? null : entry.id
-                ui.movingEntry = null
-                ui.confirmEntryDelete = null
-                render()
-              },
-            },
-            '⋯',
-          ),
-        ),
-      ui.entryMenu === entry.id && entryMenu(entry, index, section, depth, ctx),
-      ui.movingEntry === entry.id && entryPicker(entry, ctx),
     )
   }
 
-  function entryMenu(entry, index, section, depth, ctx) {
-    const confirming = ui.confirmEntryDelete === entry.id
-    const count = (section ?? session.model).entries.length
+  /** The way back up: the front page, then each section above. */
+  function breadcrumb(sections) {
+    const crumb = (label, id) =>
+      h('button', { type: 'button', class: 'crumb', 'data-always': '', onclick: () => open(id) }, label)
+    return h(
+      'nav',
+      { class: 'nb-crumbs', 'aria-label': 'Where you are' },
+      crumb(rootTitle(), null),
+      sections.map((section) => [h('span', { class: 'crumb-sep', 'aria-hidden': 'true' }, '›'), crumb(section.title, section.id)]),
+    )
+  }
+
+  function titleRow(item, ctx) {
+    return h(
+      'div',
+      { class: 'nb-title-row' },
+      ui.renaming === item.id ? renameInput(item, ctx) : h('h1', { class: 'nb-title' }, item.title),
+      moreButton(item),
+    )
+  }
+
+  /** + Add entry and + Add section; each asks for a name and adds it at the end. */
+  function addRow(sectionId, depth, ctx) {
+    const place = sectionId ?? 'top'
+    if (ui.adding?.place === place) return nameForm(sectionId, ui.adding.kind, ctx)
+    const start = (kind) => () => {
+      Object.assign(ui, { adding: { kind, place }, addDraft: '', focusTarget: `add-${place}` })
+      render()
+    }
+    return h(
+      'div',
+      { class: 'nb-add-row' },
+      h('button', { type: 'button', class: 'text-button', onclick: start('entry') }, '+ Add entry'),
+      depth < MAX_DEPTH && h('button', { type: 'button', class: 'text-button', onclick: start('section') }, '+ Add section'),
+    )
+  }
+
+  function nameForm(sectionId, kind, ctx) {
+    const add = () => {
+      const item =
+        kind === 'entry'
+          ? addEntry(session.model, sectionId, ui.addDraft, ctx.today)
+          : addSection(session.model, sectionId, ui.addDraft, ctx.today)
+      if (!item) return
+      ui.adding = null
+      ui.addDraft = ''
+      commit()
+      root.querySelector(`[data-item="${item.id}"]`)?.scrollIntoView({ block: 'nearest' })
+    }
+    const cancel = () => {
+      ui.adding = null
+      render()
+    }
+    return h(
+      'div',
+      { class: 'nb-add' },
+      h('input', {
+        type: 'text',
+        class: 'field',
+        placeholder: kind === 'entry' ? 'Entry name' : 'Section name',
+        'aria-label': kind === 'entry' ? 'New entry name' : 'New section name',
+        enterkeyhint: 'done',
+        value: ui.addDraft,
+        'data-focus': `add-${sectionId ?? 'top'}`,
+        oninput: (event) => {
+          ui.addDraft = event.target.value
+        },
+        onkeydown: (event) => {
+          if (event.key === 'Escape') cancel()
+          if (event.key !== 'Enter' || event.isComposing) return
+          event.preventDefault()
+          add()
+        },
+      }),
+      h(
+        'div',
+        { class: 'button-row' },
+        h('button', { type: 'button', class: 'button primary', onclick: add }, kind === 'entry' ? 'Add entry' : 'Add section'),
+        h('button', { type: 'button', class: 'text-button', onclick: cancel }, 'Cancel'),
+      ),
+    )
+  }
+
+  /**
+   * What's in a page, like a book's contents: sections first, with what's inside them
+   * indented underneath, then entries with their first line. Dotted leaders run to when
+   * each was last edited. Arrange swaps it for handles and menus.
+   */
+  function contentsBlock(sections, entries, ctx) {
+    if (sections.length + entries.length === 0) return null
+    return h(
+      'section',
+      { class: 'nb-contents', 'aria-label': 'Contents' },
+      h(
+        'div',
+        { class: 'nb-contents-head' },
+        h('h2', {}, 'Contents'),
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'text-button',
+            'aria-pressed': String(ui.arranging),
+            onclick: () => {
+              ui.arranging = !ui.arranging
+              ui.menu = null
+              ui.moving = null
+              render()
+            },
+          },
+          ui.arranging ? 'Done arranging' : 'Arrange',
+        ),
+      ),
+      ui.arranging
+        ? [sections.length > 0 && rowList(sections, false, ctx), entries.length > 0 && rowList(entries, true, ctx)]
+        : h(
+            'ul',
+            { class: 'toc' },
+            sections.map((section) => tocSection(section, 1, ctx)),
+            entries.map((entry) => tocEntry(entry, 1, ctx)),
+          ),
+    )
+  }
+
+  const tocLink = (item, ctx) =>
+    h(
+      'button',
+      { type: 'button', class: 'toc-entry', 'data-always': '', onclick: () => open(item.id) },
+      h('span', { class: 'toc-title' }, item.title),
+      item.edited && [
+        h('span', { class: 'toc-leader', 'aria-hidden': 'true' }),
+        h('span', { class: 'toc-meta' }, shortDate(item.edited, ctx.today)),
+      ],
+    )
+
+  function tocSection(section, level, ctx) {
+    const hasInside = section.children.length + section.entries.length > 0
+    const deeper = level === 2 ? countInside(section) : 0
+    return h(
+      'li',
+      { class: `toc-item level-${level} is-section`, 'data-item': section.id },
+      tocLink(section, ctx),
+      level === 1 &&
+        hasInside &&
+        h(
+          'ul',
+          { class: 'toc' },
+          section.children.map((child) => tocSection(child, 2, ctx)),
+          section.entries.map((entry) => tocEntry(entry, 2, ctx)),
+        ),
+      deeper > 0 && h('p', { class: 'toc-more' }, `and ${deeper} more inside`),
+    )
+  }
+
+  function tocEntry(entry, level, ctx) {
+    const preview = level === 1 && plainPreview(entry.text)
+    return h(
+      'li',
+      { class: `toc-item level-${level} is-entry`, 'data-item': entry.id },
+      tocLink(entry, ctx),
+      preview && h('p', { class: 'toc-preview' }, h('span', { class: 'toc-preview-text' }, preview)),
+    )
+  }
+
+  /** Arrange mode: rows with a drag handle, the name and a ⋯ menu. */
+  const rowList = (items, isEntry, ctx) =>
+    h(
+      'ul',
+      { class: 'nb-list' },
+      items.map((item) =>
+        h(
+          'li',
+          { class: 'nb-row', dataset: { id: item.id } },
+          dragHandle(item, isEntry),
+          h(
+            'button',
+            { type: 'button', class: 'nb-open', 'data-always': '', onclick: () => open(item.id) },
+            h('span', { class: `nb-row-title is-${isEntry ? 'entry' : 'section'}` }, item.title),
+          ),
+          moreButton(item),
+          ui.menu === item.id && itemMenu(item, isEntry, ctx),
+          ui.moving === item.id && movePicker(item, isEntry, ctx),
+        ),
+      ),
+    )
+
+  const moreButton = (item) =>
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'icon-button',
+        'aria-label': `More actions for ${item.title}`,
+        'aria-expanded': String(ui.menu === item.id),
+        onclick: () => {
+          ui.menu = ui.menu === item.id ? null : item.id
+          ui.moving = null
+          ui.confirmDelete = null
+          render()
+        },
+      },
+      '⋯',
+    )
+
+  /** Rename, Move… and Delete (two taps) for a section or an entry. */
+  function itemMenu(item, isEntry, ctx) {
+    const confirming = ui.confirmDelete === item.id
+    const inside = isEntry ? 0 : countInside(item)
     const button = (text, onclick, props = {}) => h('button', { type: 'button', class: 'button', onclick, ...props }, text)
     return h(
       'div',
       { class: 'button-row nb-menu' },
-      button('Move up', () => moveEntryByOne(session.model, entry.id, -1) && commit(), { 'data-disabled': index === 0 }),
-      button('Move down', () => moveEntryByOne(session.model, entry.id, 1) && commit(), {
-        'data-disabled': index === count - 1,
+      button('Rename', () => {
+        if (ui.current !== item.id) open(item.id)
+        Object.assign(ui, { renaming: item.id, renameDraft: null, menu: null, focusTarget: `rename-${item.id}` })
+        render()
       }),
-      button('Move to…', () => {
-        ui.movingEntry = ui.movingEntry === entry.id ? null : entry.id
+      button('Move…', () => {
+        ui.moving = ui.moving === item.id ? null : item.id
         render()
       }),
       button(
-        'Make it a section',
-        () => {
-          if (!entryToSection(session.model, entry.id, ctx.today)) return
-          ui.entryMenu = null
-          commit()
-        },
-        { 'data-disabled': depth >= MAX_DEPTH },
-      ),
-      button(
-        confirming ? 'Tap again to delete' : 'Delete',
+        confirming ? `Tap again to delete${inside ? ` it and ${inside} inside` : ''}` : 'Delete',
         () => {
           if (!confirming) {
-            ui.confirmEntryDelete = entry.id
+            ui.confirmDelete = item.id
             render()
             setTimeout(() => {
-              if (ui.confirmEntryDelete !== entry.id) return
-              ui.confirmEntryDelete = null
+              if (ui.confirmDelete !== item.id) return
+              ui.confirmDelete = null
               render()
             }, DELETE_CONFIRM_MS)
             return
           }
-          removeEntry(session.model, entry.id, ctx.today)
-          ui.entryMenu = null
-          ui.confirmEntryDelete = null
+          const found = find(item.id)
+          const above = (isEntry ? found.section : found.parent)?.id ?? null
+          if (isEntry) removeEntry(session.model, item.id, ctx.today)
+          else deleteSection(session.model, item.id)
+          if (ui.current === item.id) ui.current = above
+          ui.menu = null
+          ui.confirmDelete = null
           commit()
         },
         { class: `button danger${confirming ? ' is-confirming' : ''}` },
@@ -401,30 +607,17 @@ export function mountNotebook(root, session) {
     )
   }
 
-  function entryPicker(entry, ctx) {
-    return picker({
-      prompt: 'Move this entry to:',
-      empty: 'There is no other section yet. Add one first.',
-      targets: entryTargets(session.model, entry.id),
-      onPick: (target) => {
-        moveEntry(session.model, entry.id, target.id, ctx.today)
-        ui.movingEntry = null
-        ui.entryMenu = null
-        commit()
-      },
-      onCancel: () => {
-        ui.movingEntry = null
-        render()
-      },
-    })
-  }
-
-  /** A list of places to choose from, indented by depth. A null title is the notebook itself. */
-  function picker({ prompt, empty, targets, onPick, onCancel }) {
+  /** Where a section or an entry can move, indented by depth. A null title is the front page. */
+  function movePicker(item, isEntry, ctx) {
+    const targets = isEntry ? entryTargets(session.model, item.id) : moveTargets(session.model, item.id)
+    const close = () => {
+      ui.moving = null
+      ui.menu = null
+    }
     return h(
       'div',
       { class: 'nb-move' },
-      h('p', { class: 'meta' }, targets.length ? prompt : empty),
+      h('p', { class: 'meta' }, targets.length ? `Move "${item.title}" into:` : 'There is nowhere else it can go yet.'),
       h(
         'ul',
         { class: 'nb-move-list' },
@@ -438,205 +631,81 @@ export function mountNotebook(root, session) {
                 type: 'button',
                 class: 'nb-move-target',
                 style: `padding-left: ${0.75 + target.depth}rem`,
-                onclick: () => onPick(target),
+                onclick: () => {
+                  if (isEntry) moveEntry(session.model, item.id, target.id, ctx.today)
+                  else moveSection(session.model, item.id, target.id)
+                  close()
+                  commit()
+                },
               },
               target.title ?? rootTitle(),
             ),
           ),
         ),
       ),
-      h('button', { type: 'button', class: 'text-button', onclick: onCancel }, 'Cancel'),
-    )
-  }
-
-  /** Add entry and Add section, side by side at the foot of a section. */
-  function addRow(section, depth, ctx) {
-    if (ui.addingEntry === section.id) return entryAddForm(section, ctx)
-    if (ui.adding === section.id) return addControl(section.id, ctx)
-    return h(
-      'div',
-      { class: 'nb-add-row' },
       h(
         'button',
         {
           type: 'button',
           class: 'text-button',
           onclick: () => {
-            Object.assign(ui, { addingEntry: section.id, adding: null, entryDraft: '', focusTarget: `entry-${section.id}` })
+            ui.moving = null
             render()
           },
         },
-        '+ Add entry',
+        'Cancel',
       ),
-      depth < MAX_DEPTH && addControl(section.id, ctx),
     )
   }
 
-  function entryAddForm(section, ctx) {
-    const add = () => {
-      if (!addEntry(session.model, section.id, ui.entryDraft, ctx.today)) return
-      ui.addingEntry = null
-      ui.entryDraft = ''
-      commit()
+  function renameInput(item, ctx) {
+    const isEntry = Boolean(locateEntry(session.model, item.id))
+    const finish = (value) => {
+      if (ui.renaming !== item.id) return
+      if (value !== null) (isEntry ? renameEntry : renameSection)(session.model, item.id, value, ctx.today)
+      ui.renaming = null
+      ui.renameDraft = null
+      if (value !== null) commit()
+      else render()
     }
-    return h(
-      'div',
-      { class: 'nb-add' },
-      h('textarea', {
-        class: 'add-input',
-        rows: 4,
-        placeholder: 'Write or paste. It stays one entry, however long.',
-        'aria-label': 'New entry',
-        value: ui.entryDraft,
-        'data-focus': `entry-${section.id}`,
-        oninput: (event) => {
-          ui.entryDraft = event.target.value
-          autosize(event.target)
-        },
-      }),
-      h(
-        'div',
-        { class: 'button-row' },
-        h('button', { type: 'button', class: 'button primary', onclick: add }, 'Add entry'),
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'text-button',
-            onclick: () => {
-              ui.addingEntry = null
-              render()
-            },
-          },
-          'Cancel',
-        ),
-      ),
-    )
+    return h('input', {
+      type: 'text',
+      class: 'field nb-rename',
+      value: ui.renameDraft ?? item.title,
+      'aria-label': `New name for ${item.title}`,
+      enterkeyhint: 'done',
+      'data-focus': `rename-${item.id}`,
+      oninput: (event) => {
+        ui.renameDraft = event.target.value
+      },
+      onkeydown: (event) => {
+        if (event.key === 'Escape') finish(null)
+        if (event.key !== 'Enter') return
+        event.preventDefault()
+        finish(event.target.value)
+      },
+      // Chrome blurs a focused element when a re-render removes it; that isn't the user leaving.
+      onblur: (event) => rendering || finish(event.target.value),
+    })
   }
 
-  /** The front page: the notebook's own entries, where thoughts are added, then the contents. */
-  function topPage(ctx) {
-    const { model } = session
-    return h(
-      'section',
-      { class: 'nb-page', 'aria-label': rootTitle() },
-      h('h1', { class: 'nb-title' }, rootTitle()),
-      model.entries.length > 0 &&
-        h(
-          'div',
-          { class: 'nb-entries' },
-          model.entries.map((entry, index) => entryBlock(entry, index, null, 0, ctx)),
-        ),
-      thoughtBox(ctx),
-      contentsBlock(null, model.sections, true, ctx),
-    )
-  }
-
-  /**
-   * A contents page: section names with dotted leaders to when each was last edited, and
-   * the sections inside them indented underneath. Arrange swaps it for handles and menus.
-   */
-  function contentsBlock(parentId, sections, canAdd, ctx) {
-    if (sections.length === 0 && parentId !== null && !canAdd) return null
-    const arranging = ui.arranging && sections.length > 0
-    return h(
-      'section',
-      { class: 'nb-contents', 'aria-label': 'Contents' },
-      (sections.length > 0 || parentId === null) &&
-        h(
-          'div',
-          { class: 'nb-contents-head' },
-          h('h2', {}, 'Contents'),
-          sections.length > 0 &&
-            h(
-              'button',
-              {
-                type: 'button',
-                class: 'text-button',
-                'aria-pressed': String(arranging),
-                onclick: () => {
-                  ui.arranging = !arranging
-                  ui.menu = null
-                  ui.moving = null
-                  render()
-                },
-              },
-              arranging ? 'Done arranging' : 'Arrange',
-            ),
-        ),
-      sections.length === 0 &&
-        parentId === null &&
-        h('p', { class: 'empty' }, 'No sections yet. Add one, or paste a whole note.'),
-      arranging ? sectionList(sections, ctx) : h('ul', { class: 'toc' }, sections.map((section) => tocEntry(section, 1, ctx))),
-      canAdd && addControl(parentId, ctx),
-    )
-  }
-
-  function tocEntry(section, level, ctx) {
-    const preview = level === 1 && plainPreview(section.entries[0]?.text ?? '')
-    const entries = section.entries.length
-    const deeper = level === 2 ? countInside(section) : 0
-    return h(
-      'li',
-      { class: `toc-item level-${level}` },
-      h(
-        'button',
-        { type: 'button', class: 'toc-entry', 'data-always': '', onclick: () => open(section.id) },
-        h('span', { class: 'toc-title' }, section.title),
-        section.edited && [
-          h('span', { class: 'toc-leader', 'aria-hidden': 'true' }),
-          h('span', { class: 'toc-meta' }, shortDate(section.edited, ctx.today)),
-        ],
-      ),
-      preview &&
-        h(
-          'p',
-          { class: 'toc-preview' },
-          h('span', { class: 'toc-preview-text' }, preview),
-          entries > 1 && h('span', { class: 'toc-count' }, `${entries} entries`),
-        ),
-      level === 1 &&
-        section.children.length > 0 &&
-        h(
-          'ul',
-          { class: 'toc' },
-          section.children.map((child) => tocEntry(child, 2, ctx)),
-        ),
-      deeper > 0 && h('p', { class: 'toc-more' }, `and ${deeper} more inside`),
-    )
-  }
-
-  function breadcrumb(section) {
-    const crumb = (label, id) =>
-      h('button', { type: 'button', class: 'crumb', 'data-always': '', onclick: () => open(id) }, label)
-    return h(
-      'nav',
-      { class: 'nb-crumbs', 'aria-label': 'Where you are' },
-      crumb(rootTitle(), null),
-      pathTo(session.model, section.id)
-        .slice(0, -1)
-        .map((ancestor) => [h('span', { class: 'crumb-sep', 'aria-hidden': 'true' }, '›'), crumb(ancestor.title, ancestor.id)]),
-    )
-  }
-
-  function startEditing(key) {
-    ui.editing = key
-    ui.focusTarget = `edit-${key}`
+  function startEditing(entry) {
+    ui.editing = true
+    ui.focusTarget = `edit-${entry.id}`
     render()
   }
 
-  /** Edits an entry, `key` being its id. */
-  function editor(key, text, ctx) {
+  function editor(entry, ctx) {
     const update = (value) => {
-      setEntryText(session.model, key, value, ctx.today)
+      setEntryText(session.model, entry.id, value, ctx.today)
       saveSoon()
     }
     const textarea = h('textarea', {
       class: 'nb-editor',
       rows: 6,
-      value: text,
-      'aria-label': 'Entry text',
-      'data-focus': `edit-${key}`,
+      value: entry.text,
+      'aria-label': `Text of ${entry.title}`,
+      'data-focus': `edit-${entry.id}`,
       oninput: (event) => {
         autosize(event.target)
         update(event.target.value)
@@ -684,9 +753,7 @@ export function mountNotebook(root, session) {
             type: 'button',
             class: 'button primary',
             onclick: () => {
-              // An entry emptied completely is removed rather than kept blank.
-              if (!textarea.value.trim()) removeEntry(session.model, key, ctx.today)
-              ui.editing = null
+              ui.editing = false
               commit()
             },
           },
@@ -696,256 +763,28 @@ export function mountNotebook(root, session) {
     )
   }
 
-  const sectionList = (sections, ctx) =>
-    h(
-      'ul',
-      { class: 'nb-list' },
-      sections.map((section) => sectionRow(section, ctx)),
-    )
-
-  /** A row in Arrange mode: drag handle, name and ⋯ menu. */
-  function sectionRow(section, ctx) {
-    return h(
-      'li',
-      { class: 'nb-row', dataset: { id: section.id } },
-      dragHandle(section),
-      h(
-        'button',
-        { type: 'button', class: 'nb-open', 'data-always': '', onclick: () => open(section.id) },
-        h('span', { class: 'nb-row-title' }, section.title),
-      ),
-      moreButton(section),
-      ui.menu === section.id && sectionMenu(section, locate(session.model, section.id).depth, ctx),
-      ui.moving === section.id && movePicker(section),
-    )
-  }
-
-  const moreButton = (section) =>
-    h(
-      'button',
-      {
-        type: 'button',
-        class: 'icon-button',
-        'aria-label': `More actions for ${section.title}`,
-        'aria-expanded': String(ui.menu === section.id),
-        onclick: () => {
-          ui.menu = ui.menu === section.id ? null : section.id
-          ui.moving = null
-          ui.confirmDelete = null
-          render()
-        },
-      },
-      '⋯',
-    )
-
-  function sectionMenu(section, depth, ctx) {
-    const confirming = ui.confirmDelete === section.id
-    const inside = countInside(section)
-    const button = (text, onclick, props = {}) => h('button', { type: 'button', class: 'button', onclick, ...props }, text)
-    return h(
-      'div',
-      { class: 'button-row nb-menu' },
-      button('Rename', () => {
-        if (ui.current !== section.id) open(section.id)
-        Object.assign(ui, { renaming: section.id, renameDraft: null, menu: null, focusTarget: `rename-${section.id}` })
-        render()
-      }),
-      button(
-        'Add section inside',
-        () => {
-          if (ui.current !== section.id) open(section.id)
-          Object.assign(ui, { adding: section.id, addDraft: '', menu: null, focusTarget: `add-${section.id}` })
-          render()
-        },
-        { 'data-disabled': depth >= MAX_DEPTH },
-      ),
-      button('Move…', () => {
-        ui.moving = ui.moving === section.id ? null : section.id
-        render()
-      }),
-      button(
-        confirming ? `Tap again to delete${inside ? ` it and ${inside} inside` : ''}` : 'Delete',
-        () => {
-          if (!confirming) {
-            ui.confirmDelete = section.id
-            render()
-            setTimeout(() => {
-              if (ui.confirmDelete !== section.id) return
-              ui.confirmDelete = null
-              render()
-            }, DELETE_CONFIRM_MS)
-            return
-          }
-          const parent = locate(session.model, section.id)?.parent ?? null
-          deleteSection(session.model, section.id)
-          if (ui.current === section.id) ui.current = parent?.id ?? null
-          ui.menu = null
-          ui.confirmDelete = null
-          commit()
-        },
-        { class: `button danger${confirming ? ' is-confirming' : ''}` },
-      ),
-    )
-  }
-
-  function movePicker(section) {
-    return picker({
-      prompt: `Move "${section.title}" into:`,
-      empty: 'There is nowhere else this section fits.',
-      targets: moveTargets(session.model, section.id),
-      onPick: (target) => {
-        moveSection(session.model, section.id, target.id)
-        ui.moving = null
-        ui.menu = null
-        commit()
-      },
-      onCancel: () => {
-        ui.moving = null
-        render()
-      },
-    })
-  }
-
-  function renameInput(section, ctx) {
-    const finish = (value) => {
-      if (ui.renaming !== section.id) return
-      if (value !== null) renameSection(session.model, section.id, value, ctx.today)
-      ui.renaming = null
-      ui.renameDraft = null
-      if (value !== null) commit()
-      else render()
-    }
-    return h('input', {
-      type: 'text',
-      class: 'field nb-rename',
-      value: ui.renameDraft ?? section.title,
-      'aria-label': `New name for ${section.title}`,
-      enterkeyhint: 'done',
-      'data-focus': `rename-${section.id}`,
-      oninput: (event) => {
-        ui.renameDraft = event.target.value
-      },
-      onkeydown: (event) => {
-        if (event.key === 'Escape') finish(null)
-        if (event.key !== 'Enter') return
-        event.preventDefault()
-        finish(event.target.value)
-      },
-      // Chrome blurs a focused element when a re-render removes it; that isn't the user leaving.
-      onblur: (event) => rendering || finish(event.target.value),
-    })
-  }
-
-  function addControl(parentId, ctx) {
-    const key = parentId ?? 'top'
-    if (ui.adding !== key) {
-      return h(
-        'button',
-        {
-          type: 'button',
-          class: 'text-button',
-          onclick: () => {
-            Object.assign(ui, { adding: key, addingEntry: null, addDraft: '', focusTarget: `add-${key}` })
-            render()
-          },
-        },
-        parentId === null ? '+ Add section' : '+ Add a section inside',
-      )
-    }
-    const add = () => {
-      if (!addSection(session.model, parentId, ui.addDraft, ctx.today)) return
-      ui.adding = null
-      ui.addDraft = ''
-      commit()
-    }
-    return h(
-      'div',
-      { class: 'nb-add' },
-      h('textarea', {
-        class: 'add-input',
-        rows: 3,
-        placeholder: 'A name, or paste a whole note (its first line becomes the name)',
-        'aria-label': 'New section',
-        value: ui.addDraft,
-        'data-focus': `add-${key}`,
-        oninput: (event) => {
-          ui.addDraft = event.target.value
-          autosize(event.target)
-        },
-      }),
-      h(
-        'div',
-        { class: 'button-row' },
-        h('button', { type: 'button', class: 'button primary', onclick: add }, 'Add section'),
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'text-button',
-            onclick: () => {
-              ui.adding = null
-              render()
-            },
-          },
-          'Cancel',
-        ),
-      ),
-    )
-  }
-
-  /** A one-line box for adding an entry to the notebook itself. */
-  function thoughtBox(ctx) {
-    const add = () => {
-      if (!addEntry(session.model, null, ui.thought, ctx.today)) return
-      ui.thought = ''
-      commit()
-    }
-    return h(
-      'div',
-      { class: 'nb-thought' },
-      h('textarea', {
-        class: 'add-input',
-        rows: 1,
-        placeholder: 'Add a thought…',
-        'aria-label': 'Add a thought',
-        enterkeyhint: 'done',
-        value: ui.thought,
-        'data-focus': 'thought',
-        oninput: (event) => {
-          ui.thought = event.target.value
-          autosize(event.target)
-        },
-        onkeydown: (event) => {
-          if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
-          event.preventDefault()
-          add()
-        },
-      }),
-      h('button', { type: 'button', class: 'text-button nb-thought-add', onclick: add }, 'Add'),
-    )
-  }
-
-  function dragHandle(section) {
+  function dragHandle(item, isEntry) {
     return h(
       'button',
       {
         type: 'button',
         class: 'drag-handle',
-        'aria-label': `Move ${section.title}: drag, or use the arrow keys`,
-        'data-focus': `handle-${section.id}`,
-        onpointerdown: (event) => startDrag(event, section),
+        'aria-label': `Move ${item.title}: drag, or use the arrow keys`,
+        'data-focus': `handle-${item.id}`,
+        onpointerdown: (event) => startDrag(event, item, isEntry),
         onkeydown: (event) => {
           if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
           event.preventDefault()
-          if (moveSectionByOne(session.model, section.id, event.key === 'ArrowUp' ? -1 : 1)) commit()
+          const step = event.key === 'ArrowUp' ? -1 : 1
+          if ((isEntry ? moveEntryByOne : moveSectionByOne)(session.model, item.id, step)) commit()
         },
       },
       '⠿',
     )
   }
 
-  /** Drags a section among its siblings by its handle (mouse or touch). Move… changes its parent. */
-  function startDrag(event, section) {
+  /** Drags a row among its own list by its handle (mouse or touch). Move… changes where it lives. */
+  function startDrag(event, item, isEntry) {
     if (session.readOnly || event.button > 0) return
     event.preventDefault()
     const handle = event.currentTarget
@@ -973,7 +812,8 @@ export function mountNotebook(root, session) {
       document.body.classList.remove('is-dragging-todo')
       indicator.remove()
       if (!drop || target === undefined) return render()
-      reorderSection(session.model, section.id, target ? Number(target.dataset.id) : null)
+      const beforeId = target ? Number(target.dataset.id) : null
+      ;(isEntry ? reorderEntry : reorderSection)(session.model, item.id, beforeId)
       commit()
     }
     const onUp = () => finish(true)
