@@ -15,7 +15,8 @@ export function wrap({ value, start, end }, marker, closing = marker) {
 }
 
 const NUMBERED = /^\d+[.)] /
-const BULLET = /^[-*+] (?!\[[ xX]\] )/ // a plain bullet, not a checklist item
+const BULLET = /^[-*+] /
+const CHECKLIST = /^[-*+] \[[ xX]\] /
 
 /** The lines the selection touches: { from, to, lines }. */
 function touchedLines({ value, start, end }) {
@@ -51,18 +52,22 @@ export function prefixLines(state, prefix) {
 }
 
 /**
- * Numbers every line the selection touches (`1. `, `2. `, …), turning bullets into numbers
+ * Numbers the lines the selection touches (`1. `, `2. `, …), turning bullets into numbers
  * and renumbering ones already numbered, or removes the numbers if every line has one.
+ * Checklist items are left as they are, so they can still be ticked.
  */
 export function numberLines(state) {
   const touched = touchedLines(state)
-  const remove = touched.lines.every((line) => NUMBERED.test(line))
+  const numberable = touched.lines.filter((line) => !CHECKLIST.test(line))
+  const remove = numberable.length > 0 && numberable.every((line) => NUMBERED.test(line))
+  let count = 0
   return replaceLines(
     state,
     touched,
-    touched.lines.map((line, index) => {
+    touched.lines.map((line) => {
+      if (CHECKLIST.test(line)) return line
       const bare = line.replace(NUMBERED, '')
-      return remove ? bare : `${index + 1}. ${bare.replace(BULLET, '')}`
+      return remove ? bare : `${++count}. ${bare.replace(BULLET, '')}`
     }),
   )
 }

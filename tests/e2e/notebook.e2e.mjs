@@ -106,6 +106,8 @@ await check('adding a section and an entry takes just a name, and stays on the l
   assert.equal(await saved(), `${MARKER}\n\n## Sleep\n${EDITED}\n\n## Ask Sam about his app\n${ENTRY}`)
   assert.deepEqual(await contents(frame), ['Sleep', 'Ask Sam about his app'], 'sections first, then entries')
   assert.equal(await frame.$('.nb-crumbs'), null, 'still on the front page')
+  assert.deepEqual(await texts(frame, '.nb-add-row button'), ['+ Add entry', '+ Add section', 'Arrange'], 'Arrange once there is something')
+  assert.equal(await frame.$('.nb-contents h2'), null, 'no Contents heading')
 })
 
 await check('a section holds entries and sections of its own, with a trail back', async () => {
@@ -154,6 +156,23 @@ await check('typing saves after a pause, and the toolbar formats the selection',
   assert.match(await saved(), /- \*\*No coffee\*\* after 2pm \(or tea\)/)
   await clickButton(frame, 'Done')
   assert.equal(await text(frame, '.md li strong'), 'No coffee')
+})
+
+await check('the toolbar numbers lines and underlines', async () => {
+  await clickButton(frame, 'Edit')
+  await setValue(frame, '.nb-editor', 'Rest well\nSleep early')
+  await frame.$eval('.nb-editor', (field) => field.setSelectionRange(0, field.value.length))
+  await frame.click('[aria-label="Numbered list"]')
+  await frame.$eval('.nb-editor', (field) => {
+    const at = field.value.indexOf('well')
+    field.setSelectionRange(at, at + 'well'.length)
+  })
+  await frame.click('[aria-label="Underline"]')
+  await clickButton(frame, 'Done')
+  await wait(900)
+  assert.match(await saved(), /\n1\. Rest <u>well<\/u>\n2\. Sleep early\n/)
+  assert.equal(await frame.$$eval('.md ol li', (els) => els.length), 2)
+  assert.equal(await text(frame, '.md u'), 'well')
 })
 
 await check('HTML in a note is shown as text and never runs', async () => {

@@ -28,6 +28,14 @@ test('HTML is never markup, just text', () => {
   ])
 })
 
+test('underline is the one exception, and only as a <u> pair', () => {
+  assert.deepEqual(inline('<u>under **this**</u> and <u>unclosed'), [
+    { tag: 'u', children: ['under ', { tag: 'strong', children: ['this'] }] },
+    ' and <u>unclosed',
+  ])
+  assert.deepEqual(inline('<u onclick="x()">no</u>'), ['<u onclick="x()">no</u>'], 'attributes mean it stays text')
+})
+
 test('links open in a new tab; unsafe links and images do not become live', () => {
   const [link] = inline('[site](https://example.com)')
   assert.deepEqual(link, {
@@ -74,6 +82,7 @@ test('checklist numbering skips code blocks, and toggling flips the right one', 
 
 test('previews are the first line without Markdown symbols', () => {
   assert.equal(plainPreview('\n- [ ] **Buy** [filters](https://x.y)\nmore'), 'Buy filters')
+  assert.equal(plainPreview('1. <u>Really</u> soon'), 'Really soon')
   assert.equal(plainPreview('a'.repeat(200), 20).length, 20)
   assert.equal(plainPreview(''), '')
 })
