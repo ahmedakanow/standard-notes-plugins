@@ -444,8 +444,8 @@ export function mountNotebook(root, session) {
 
   /**
    * What's in a page, like a book's contents: sections first, with what's inside them
-   * indented underneath, then entries with their first line. Dotted leaders run to when
-   * each was last edited. Arrange swaps it for handles and menus.
+   * indented underneath, then entries with their first line. When each was last edited
+   * sits at the right. Arrange swaps it for handles and menus.
    */
   function contentsBlock(sections, entries, ctx) {
     if (sections.length + entries.length === 0) return null
@@ -488,10 +488,7 @@ export function mountNotebook(root, session) {
       'button',
       { type: 'button', class: 'toc-entry', 'data-always': '', onclick: () => open(item.id) },
       h('span', { class: 'toc-title' }, item.title),
-      item.edited && [
-        h('span', { class: 'toc-leader', 'aria-hidden': 'true' }),
-        h('span', { class: 'toc-meta' }, shortDate(item.edited, ctx.today)),
-      ],
+      item.edited && h('span', { class: 'toc-meta' }, shortDate(item.edited, ctx.today)),
     )
 
   function tocSection(section, level, ctx) {

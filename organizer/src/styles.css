@@ -835,7 +835,6 @@ h1 {
 .notebook {
   --serif: 'Alegreya', 'Iowan Old Style', Georgia, serif;
   --rule: color-mix(in srgb, var(--fg) 13%, var(--bg));
-  --leader: color-mix(in srgb, var(--fg) 38%, var(--bg));
   --measure: 36rem;
   display: flex;
   flex-direction: column;
@@ -1112,17 +1111,11 @@ h1 {
   color: var(--accent);
 }
 
-/* Dotted leaders run from the name to the date, like a book's page numbers. */
-.toc-leader {
-  flex: 1 1 1.5rem;
-  min-width: 1.5rem;
-  align-self: last baseline;
-  height: 0;
-  border-bottom: 0.15em dotted var(--leader);
-}
-
+/* The date sits at the right, like a page number. */
 .toc-meta {
   flex: none;
+  margin-left: auto;
+  padding-left: 1rem;
   font-size: 0.875em;
   font-style: italic;
   font-weight: 400;
