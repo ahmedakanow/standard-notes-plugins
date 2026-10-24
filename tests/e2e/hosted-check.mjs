@@ -3,7 +3,6 @@ import { launchBrowser } from './support.mjs'
 
 const BASE = 'https://ahmedakanow.github.io/standard-notes-plugins'
 const PLUGINS = [
-  { path: 'daily-journal', ready: '#journal:not([hidden])', probe: () => document.querySelector('#date-line').textContent },
   { path: 'organizer', ready: '.todos', probe: () => `${document.querySelectorAll('.todo').length} todos shown` },
   {
     path: 'organizer',

@@ -4,7 +4,6 @@ Personal plugins for [Standard Notes](https://standardnotes.com). Your notes sta
 
 | Plugin | What it does | Install URL |
 | --- | --- | --- |
-| [Daily Journal](daily-journal/) | One guided journal entry per note: mood, gratitude, focus, free writing, prompt of the day | `https://ahmedakanow.github.io/standard-notes-plugins/daily-journal/ext.json` |
 | [Organizer](organizer/) | Notes shaped for what they hold. Todos: a routine with streaks, groups, stale todos parked instead of lost. Notebook: one topic in one note, organized into sections. People coming next | `https://ahmedakanow.github.io/standard-notes-plugins/organizer/ext.json` |
 
 ## Installing a plugin

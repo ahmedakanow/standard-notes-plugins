@@ -24,7 +24,7 @@
       frame.sandbox =
         'allow-scripts allow-top-navigation-by-user-activation allow-popups allow-modals allow-forms allow-downloads'
       if (MOBILE) frame.referrerPolicy = 'no-referrer'
-      frame.src = `${PLUGIN_ORIGIN}/${params.get('plugin') || 'daily-journal'}/index.html`
+      frame.src = `${PLUGIN_ORIGIN}/${params.get('plugin') || 'organizer'}/index.html`
 
       const notes = {
         a: {
@@ -39,7 +39,7 @@
           created_at: '2026-10-21T12:00:00.000Z',
           content: {
             title: 'B',
-            text: '# October 21, 2026\nMood: 😄 Great\n\n## Journal\nNote B body\n\n## Dreams\nFlying again',
+            text: 'Note B body',
             appData: {},
           },
         },

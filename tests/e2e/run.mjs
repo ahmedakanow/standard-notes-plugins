@@ -10,7 +10,7 @@ import httpServer from 'http-server'
 import { HOST, PLUGIN, SHOTS_DIR } from './support.mjs'
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
-const SUITES = ['daily-journal.e2e.mjs', 'organizer.e2e.mjs', 'notebook.e2e.mjs', 'android-replay.e2e.mjs']
+const SUITES = ['organizer.e2e.mjs', 'notebook.e2e.mjs']
 
 function serve(root, origin) {
   const server = httpServer.createServer({ root, cors: true, cache: -1, showDir: false, logFn: () => {} })
