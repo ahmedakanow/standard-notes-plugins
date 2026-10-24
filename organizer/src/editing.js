@@ -14,23 +14,57 @@ export function wrap({ value, start, end }, marker, closing = marker) {
   }
 }
 
+const NUMBERED = /^\d+[.)] /
+const BULLET = /^[-*+] (?!\[[ xX]\] )/ // a plain bullet, not a checklist item
+
+/** The lines the selection touches: { from, to, lines }. */
+function touchedLines({ value, start, end }) {
+  const from = value.lastIndexOf('\n', start - 1) + 1
+  const lineEnd = value.indexOf('\n', Math.max(end - (end > start && value[end - 1] === '\n' ? 1 : 0), start))
+  const to = lineEnd === -1 ? value.length : lineEnd
+  return { from, to, lines: value.slice(from, to).split('\n') }
+}
+
+/** Puts `changed` in place of the touched lines: on one line the caret moves with the text, across several they're selected. */
+function replaceLines({ value, start, end }, { from, to, lines }, changed) {
+  const text = changed.join('\n')
+  const next = `${value.slice(0, from)}${text}${value.slice(to)}`
+  if (lines.length === 1) {
+    const shift = text.length - lines[0].length
+    return { value: next, start: Math.max(from, start + shift), end: Math.max(from, end + shift) }
+  }
+  return { value: next, start: from, end: from + text.length }
+}
+
 /**
  * Adds a prefix such as `- ` to every line the selection touches, or removes it if all of
  * them already have it.
  */
-export function prefixLines({ value, start, end }, prefix) {
-  const from = value.lastIndexOf('\n', start - 1) + 1
-  const lineEnd = value.indexOf('\n', Math.max(end - (end > start && value[end - 1] === '\n' ? 1 : 0), start))
-  const to = lineEnd === -1 ? value.length : lineEnd
-  const lines = value.slice(from, to).split('\n')
-  const remove = lines.every((line) => line.startsWith(prefix))
-  const changed = lines.map((line) => (remove ? line.slice(prefix.length) : `${prefix}${line}`)).join('\n')
-  const next = `${value.slice(0, from)}${changed}${value.slice(to)}`
-  if (lines.length === 1) {
-    const shift = remove ? -prefix.length : prefix.length
-    return { value: next, start: Math.max(from, start + shift), end: Math.max(from, end + shift) }
-  }
-  return { value: next, start: from, end: from + changed.length }
+export function prefixLines(state, prefix) {
+  const touched = touchedLines(state)
+  const remove = touched.lines.every((line) => line.startsWith(prefix))
+  return replaceLines(
+    state,
+    touched,
+    touched.lines.map((line) => (remove ? line.slice(prefix.length) : `${prefix}${line}`)),
+  )
+}
+
+/**
+ * Numbers every line the selection touches (`1. `, `2. `, …), turning bullets into numbers
+ * and renumbering ones already numbered, or removes the numbers if every line has one.
+ */
+export function numberLines(state) {
+  const touched = touchedLines(state)
+  const remove = touched.lines.every((line) => NUMBERED.test(line))
+  return replaceLines(
+    state,
+    touched,
+    touched.lines.map((line, index) => {
+      const bare = line.replace(NUMBERED, '')
+      return remove ? bare : `${index + 1}. ${bare.replace(BULLET, '')}`
+    }),
+  )
 }
 
 /** Turns the selection into `[text](https://)` with the address selected, ready to type. */

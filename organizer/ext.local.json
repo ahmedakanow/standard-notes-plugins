@@ -4,6 +4,6 @@
   "description": "Development copy served by npm start. Installs alongside the published Organizer.",
   "content_type": "SN|Component",
   "area": "editor-editor",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "url": "http://localhost:8001/organizer/index.html"
 }

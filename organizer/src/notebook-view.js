@@ -1,6 +1,6 @@
 import { shortDate } from './dates.js'
 import { autosize, captureFocus, h, restoreFocus } from './dom.js'
-import { insertLink, prefixLines, wrap } from './editing.js'
+import { insertLink, numberLines, prefixLines, wrap } from './editing.js'
 import { plainPreview, renderMarkdown } from './markdown.js'
 import {
   MAX_DEPTH,
@@ -314,6 +314,8 @@ export function mountNotebook(root, session) {
    * what's inside.
    */
   function sectionPage(section, depth, ctx) {
+    const sections = section ? section.children : session.model.sections
+    const entries = section ? section.entries : session.model.entries
     return h(
       'section',
       { class: 'nb-page', 'aria-label': section?.title ?? rootTitle() },
@@ -324,8 +326,8 @@ export function mountNotebook(root, session) {
         ui.menu === section.id && itemMenu(section, false, ctx),
         ui.moving === section.id && movePicker(section, false, ctx),
       ],
-      addRow(section?.id ?? null, depth, ctx),
-      contentsBlock(section ? section.children : session.model.sections, section ? section.entries : session.model.entries, ctx),
+      addRow(section?.id ?? null, depth, sections.length + entries.length > 0, ctx),
+      contentsBlock(sections, entries, ctx),
     )
   }
 
@@ -380,8 +382,11 @@ export function mountNotebook(root, session) {
     )
   }
 
-  /** + Add entry and + Add section; each asks for a name and adds it at the end. */
-  function addRow(sectionId, depth, ctx) {
+  /**
+   * + Add entry and + Add section, each asking for a name and adding it at the end, and
+   * Arrange when there's something to arrange.
+   */
+  function addRow(sectionId, depth, canArrange, ctx) {
     const place = sectionId ?? 'top'
     if (ui.adding?.place === place) return nameForm(sectionId, ui.adding.kind, ctx)
     const start = (kind) => () => {
@@ -393,6 +398,22 @@ export function mountNotebook(root, session) {
       { class: 'nb-add-row' },
       h('button', { type: 'button', class: 'text-button', onclick: start('entry') }, '+ Add entry'),
       depth < MAX_DEPTH && h('button', { type: 'button', class: 'text-button', onclick: start('section') }, '+ Add section'),
+      canArrange &&
+        h(
+          'button',
+          {
+            type: 'button',
+            class: 'text-button',
+            'aria-pressed': String(ui.arranging),
+            onclick: () => {
+              ui.arranging = !ui.arranging
+              ui.menu = null
+              ui.moving = null
+              render()
+            },
+          },
+          ui.arranging ? 'Done arranging' : 'Arrange',
+        ),
     )
   }
 
@@ -445,33 +466,13 @@ export function mountNotebook(root, session) {
   /**
    * What's in a page, like a book's contents: sections first, with what's inside them
    * indented underneath, then entries with their first line. When each was last edited
-   * sits at the right. Arrange swaps it for handles and menus.
+   * sits at the right. Arrange (beside the add buttons) swaps it for handles and menus.
    */
   function contentsBlock(sections, entries, ctx) {
     if (sections.length + entries.length === 0) return null
     return h(
       'section',
       { class: 'nb-contents', 'aria-label': 'Contents' },
-      h(
-        'div',
-        { class: 'nb-contents-head' },
-        h('h2', {}, 'Contents'),
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'text-button',
-            'aria-pressed': String(ui.arranging),
-            onclick: () => {
-              ui.arranging = !ui.arranging
-              ui.menu = null
-              ui.moving = null
-              render()
-            },
-          },
-          ui.arranging ? 'Done arranging' : 'Arrange',
-        ),
-      ),
       ui.arranging
         ? [sections.length > 0 && rowList(sections, false, ctx), entries.length > 0 && rowList(entries, true, ctx)]
         : h(
@@ -738,6 +739,7 @@ export function mountNotebook(root, session) {
         tool('I', 'Italic', (state) => wrap(state, '_')),
         tool('U', 'Underline', (state) => wrap(state, '<u>', '</u>')),
         tool('•', 'Bulleted list', (state) => prefixLines(state, '- ')),
+        tool('1.', 'Numbered list', numberLines),
         tool('☐', 'Checklist', (state) => prefixLines(state, '- [ ] ')),
         tool('🔗', 'Link', insertLink),
       ),
