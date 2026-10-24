@@ -182,6 +182,7 @@ export function plainPreview(text, length = 90) {
     .find((candidate) => candidate.trim() && !FENCE.test(candidate))
   if (!line) return ''
   const plain = line
+    .replace(/\\([\\`*_{}[\]()#+\-.!<>~|])/g, '$1') // Markdown's escapes, as the editor writes them
     .replace(/^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/, '')
     .replace(/^\s*>\s?/, '')
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')

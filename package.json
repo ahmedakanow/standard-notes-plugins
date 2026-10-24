@@ -8,10 +8,13 @@
     "test": "node --test \"*/test/*.test.js\"",
     "test:browser": "node tests/e2e/run.mjs",
     "test:hosted": "node tests/e2e/hosted-check.mjs",
-    "vendor": "node -e \"require('fs').copyFileSync('node_modules/@standardnotes/component-relay/dist/dist.js', 'shared/vendor/component-relay.js')\""
+    "vendor": "node -e \"require('fs').copyFileSync('node_modules/@standardnotes/component-relay/dist/dist.js', 'shared/vendor/component-relay.js')\" && npm run vendor:editor",
+    "vendor:editor": "esbuild organizer/vendor-src/milkdown.js --bundle --format=esm --minify --target=es2020 --legal-comments=linked --outfile=organizer/vendor/milkdown.js"
   },
   "devDependencies": {
+    "@milkdown/kit": "7.22.3",
     "@standardnotes/component-relay": "2.2.2",
+    "esbuild": "0.28.2",
     "http-server": "^14.1.1",
     "puppeteer-core": "^23.11.1"
   }

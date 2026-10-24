@@ -49,9 +49,9 @@ Any `## Heading` other than Parked and Done is a group, so typing one on your ph
 Everything about one topic, such as Health, a project or a trip, in one note, organized like folders. Instead of a dozen scattered notes you can't find again, you get one place where you can see everything at a glance.
 
 - **Folders and files:** a notebook starts blank, with **+ Add entry** and **+ Add section** at the top. Sections are like folders and entries like files: both just need a name. A section holds entries and sections of its own, up to four levels deep, and has the same two buttons at its top. An entry holds text, if you want to add any.
-- **Contents:** every page lists its sections first, then its entries, like a book's contents page. Each name has when it was last edited at the right; a section shows what's inside it indented underneath, and an entry the first line of its text. There's no title on the front page, since Standard Notes already shows the note's name. Tap a section to go into it, or an entry to open it; the trail at the top ("Health › Sleep") takes you back. On a wide screen the whole tree stays on the left.
-- **Reading an entry** shows its text formatted: bold, italics, underline, lists, checklists you can tick, links, quotes and code. Images show as links instead of loading. **Edit** (or **Add text**) opens the text with a small toolbar (bold, italic, underline, bulleted list, numbered list, checklist, link). Markdown has no underline of its own, so it's saved as `<u>text</u>`, as in Obsidian and Typora; that's the only HTML Organizer reads, and anything else shows as plain text.
-- **Bring notes in** by adding an entry, opening it and pasting the note's text; it stays exactly as it was. Then archive the original note.
+- **Contents:** every page lists its sections first, then its entries, like a book's contents page. Each name has when it was last edited at the right. Under a section, what's inside it runs on one line, separated by semicolons, the way a book's contents lists sub-sections: sections in upright type with how much they hold, entries in italics, each one tappable. Under an entry is the first line of its text. There's no title on the front page, since Standard Notes already shows the note's name. Tap a section to go into it, or an entry to open it; the trail at the top ("Health › Sleep") takes you back. On a wide screen the whole tree stays on the left.
+- **An entry** opens on its text, formatted, and you read and type in the same place: there's no Edit or Done. The editor is [Milkdown](https://milkdown.dev), an open-source Markdown editor built on ProseMirror. A toolbar above the text has bold, italic, underline, bulleted list, numbered list, checklist and link, and stays in reach as a long entry scrolls. Checklists tick with a tap. A tap on a link opens it, unless you're already typing, where it just places the cursor. Images show as their description instead of loading, and HTML in a note shows as plain text. Markdown has no underline of its own, so it's saved as `<u>text</u>`, as in Obsidian and Typora. Locked notes can be read but not changed.
+- **Bring notes in** by adding an entry, opening it and pasting. Text copied from Google Docs, Word or a web page keeps its bold, italics, underline, lists and links. Then archive the original note.
 - **Organizing:** an open section's or entry's **⋯** menu renames, moves (sections only to places they fit) or deletes it, which takes two taps. To work on a whole list, tap **Arrange**, beside **+ Add section**: each section and entry gets a **⠿** handle to drag (or arrow keys) and its own **⋯** menu.
 - **Search** covers every name and every entry's text. Name matches come first, and opening a result highlights the match.
 - Sections and entries show when they were last edited; changing an entry counts for the section it's in. Typing saves after a two-second pause, because every save re-uploads the whole note; keep a notebook to one topic, well under a megabyte.
@@ -104,6 +104,8 @@ From the repository root, `npm install` once, then `npm start`.
 
 `npm test` runs the unit tests. Bump `version` in `ext.json` when you release changes, and never change `identifier`.
 
+The editor's Milkdown code is bundled into `vendor/milkdown.js`, so the plugin loads it from its own site. `vendor-src/milkdown.js` lists what's used; after changing it or updating Milkdown, run `npm run vendor`.
+
 ## Files
 
 | File | What it does |
@@ -115,6 +117,7 @@ From the repository root, `npm install` once, then `npm start`.
 | `src/todos-view.js` | The Todos screen. |
 | `src/notebook.js` | Notebook's section tree and plain-text format. No DOM. |
 | `src/notebook-view.js` | The Notebook screen. |
-| `src/markdown.js` | Formatted reading: Markdown to a safe tree the view turns into DOM as text only. |
-| `src/editing.js` | The editor toolbar's actions. |
+| `src/entry-editor.js` | An entry's editor: Milkdown with underline, checklists, a toolbar and search highlighting. |
+| `vendor/milkdown.js` | Milkdown, bundled by `npm run vendor` from `vendor-src/milkdown.js`. |
+| `src/markdown.js` | The one-line previews in lists, and a safe Markdown reader. |
 | `src/dates.js`, `src/dom.js` | Small date and DOM helpers. |

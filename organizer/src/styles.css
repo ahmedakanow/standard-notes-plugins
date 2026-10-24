@@ -965,9 +965,9 @@ h1 {
   min-width: 0;
   margin: 0;
   font-family: var(--serif);
-  font-size: 2.5rem;
+  font-size: 2rem;
   font-weight: 700;
-  line-height: 1.05;
+  line-height: 1.1;
   letter-spacing: -0.01em;
   overflow-wrap: anywhere;
 }
@@ -979,7 +979,7 @@ h1 {
 }
 
 .nb-title-row .icon-button {
-  margin-top: 0.25rem;
+  margin-top: 0.125rem;
 }
 
 .nb-rename {
@@ -990,12 +990,22 @@ h1 {
   font-weight: 700;
 }
 
+/* The trail back up on the left, when it was last edited on the right. */
+.nb-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 1rem;
+  flex-wrap: wrap;
+  margin-bottom: -0.875rem;
+}
+
 .nb-crumbs {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.375rem;
-  margin-bottom: -0.75rem;
+  min-width: 0;
   font-family: var(--serif);
   font-style: italic;
   font-size: 1rem;
@@ -1020,10 +1030,12 @@ h1 {
 }
 
 .nb-edited {
-  margin-top: -1rem;
+  margin: 0;
+  font-size: 0.8125rem;
+  white-space: nowrap;
 }
 
-/* The contents page: the memorable part */
+/* The contents: the memorable part */
 
 .nb-contents {
   display: flex;
@@ -1032,19 +1044,18 @@ h1 {
 }
 
 .toc {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
   margin: 0;
   padding: 0;
   list-style: none;
   font-family: var(--serif);
 }
 
-.toc .toc {
-  margin-top: 0.125rem;
-  padding-left: 1.5rem;
-}
-
-.toc-item.level-1 {
-  padding: 0.5rem 0 0.625rem;
+/* Sections come first; a little more room marks where the entries start. */
+.toc-item.is-section + .toc-item.is-entry {
+  margin-top: 0.5rem;
 }
 
 .toc-entry {
@@ -1061,27 +1072,19 @@ h1 {
   cursor: pointer;
 }
 
-.level-1 > .toc-entry {
+.toc-entry {
+  line-height: 1.3;
+}
+
+/* Sections are set heavier than entries, as chapters are in a book's contents. */
+.is-section > .toc-entry {
   font-size: 1.3125rem;
   font-weight: 700;
 }
 
-.level-2 > .toc-entry {
-  font-size: 1.0625rem;
-}
-
-/* Sections are set heavier than entries, as chapters are in a book's contents. */
-.toc-item.level-1.is-entry {
-  padding: 0.25rem 0 0.375rem;
-}
-
-.level-1.is-entry > .toc-entry {
+.is-entry > .toc-entry {
   font-size: 1.125rem;
   font-weight: 400;
-}
-
-.level-2.is-section > .toc-entry {
-  font-weight: 600;
 }
 
 .toc-title {
@@ -1106,17 +1109,16 @@ h1 {
 }
 
 .toc-preview,
-.toc-more {
-  margin: 0.125rem 0 0.25rem;
+.toc-inside {
+  margin: 0.125rem 0 0;
   font-size: 1rem;
   font-style: italic;
+  line-height: 1.55;
   color: var(--muted);
 }
 
 .toc-preview {
   display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
   min-width: 0;
 }
 
@@ -1127,8 +1129,41 @@ h1 {
   white-space: nowrap;
 }
 
-.toc-more {
-  font-size: 0.9375rem;
+/* What's inside a section, run in and separated by semicolons. Each name opens it. Names
+   are a shade darker than an entry's quoted first line. */
+.toc-inside {
+  color: color-mix(in srgb, var(--fg) 72%, var(--bg));
+}
+
+.toc-run {
+  display: inline;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0.125rem 0;
+  cursor: pointer;
+}
+
+.toc-run:hover {
+  color: var(--accent);
+}
+
+.toc-run.is-section {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.toc-run.is-section:hover {
+  color: var(--accent);
+}
+
+.toc-held {
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: oldstyle-nums;
 }
 
 /* Arrange mode and search results */
@@ -1241,17 +1276,7 @@ h1 {
   align-self: flex-start;
 }
 
-/* Reading and editing an entry, and adding things */
-
-.nb-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.nb-text > .text-button {
-  align-self: flex-start;
-}
+/* Adding things */
 
 .nb-add-row {
   display: flex;
@@ -1259,8 +1284,7 @@ h1 {
   gap: 0.5rem 1.5rem;
 }
 
-.nb-add,
-.nb-editor-wrap {
+.nb-add {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -1271,28 +1295,81 @@ h1 {
   width: 100%;
 }
 
-.nb-editor {
-  width: 100%;
-  min-height: 8rem;
-  resize: none;
-  overflow: hidden;
-  font-family: var(--serif);
-  font-size: 1.125rem;
-  line-height: 1.6;
-  color: inherit;
-  background: var(--bg);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  padding: 0.75rem 0.875rem;
+/* An entry's text: Milkdown's editor, read and typed in the same place */
+
+.nb-entry-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-.nb-editor:focus {
+/* The toolbar stays in reach while a long entry scrolls. */
+.nb-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.375rem 0;
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
+}
+
+.nb-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: var(--measure);
+}
+
+.nb-link-row[hidden] {
+  display: none;
+}
+
+.nb-link-field {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+/* ProseMirror's own rules, which it needs to edit correctly. */
+.ProseMirror {
+  position: relative;
+  min-height: 6rem;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  white-space: break-spaces;
+  font-variant-ligatures: none;
   outline: none;
 }
 
-.nb-toolbar {
-  display: flex;
-  gap: 0.25rem;
+.ProseMirror pre {
+  white-space: pre-wrap;
+}
+
+.ProseMirror li {
+  position: relative;
+}
+
+.ProseMirror-hideselection *::selection {
+  background: transparent;
+}
+
+.ProseMirror-hideselection {
+  caret-color: transparent;
+}
+
+.ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+}
+
+.ProseMirror.is-empty::before {
+  content: 'Write or paste here…';
+  position: absolute;
+  font-style: italic;
+  color: var(--placeholder);
+  pointer-events: none;
 }
 
 .tool {
@@ -1352,31 +1429,52 @@ h1 {
   padding-left: 1.25em;
 }
 
-.md li > ul,
-.md li > ol {
+.md li p {
+  margin: 0;
+}
+
+.md li ul,
+.md li ol {
   margin: 0.2em 0;
 }
 
-.md .md-check {
-  list-style: none;
+/* A checklist item: its box where the bullet would be. */
+.md li[data-item-type='task'] {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
   margin-left: -1.25em;
+  list-style: none;
 }
 
-.md .md-check label {
-  cursor: pointer;
+.md li[data-item-type='task'] > div {
+  flex: 1;
+  min-width: 0;
 }
 
-.md .md-check input {
+.md-box {
+  flex: none;
   width: 1.1em;
   height: 1.1em;
-  margin: 0 0.35em 0 0;
-  vertical-align: -0.15em;
+  margin: 0;
+  align-self: center;
   accent-color: var(--accent);
   cursor: pointer;
 }
 
-.md-heading {
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 1em 0 0.4em;
+  font-size: 1.05em;
   font-weight: 700;
+}
+
+.md-image {
+  color: var(--muted);
 }
 
 .md blockquote {
@@ -1428,7 +1526,7 @@ mark {
     font-size: 2rem;
   }
 
-  .level-1 > .toc-entry {
+  .is-section > .toc-entry {
     font-size: 1.1875rem;
   }
 

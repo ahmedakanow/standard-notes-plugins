@@ -1,7 +1,7 @@
 import { shortDate } from './dates.js'
-import { autosize, captureFocus, h, restoreFocus } from './dom.js'
-import { insertLink, numberLines, prefixLines, wrap } from './editing.js'
-import { plainPreview, renderMarkdown } from './markdown.js'
+import { captureFocus, h, restoreFocus } from './dom.js'
+import { mountEntryEditor } from './entry-editor.js'
+import { plainPreview } from './markdown.js'
 import {
   MAX_DEPTH,
   addEntry,
@@ -24,13 +24,13 @@ import {
   reorderSection,
   searchNotebook,
   setEntryText,
-  toggleCheck,
 } from './notebook.js'
 
 // Every save re-uploads the whole note, so typing saves after a pause, not per keystroke.
 const TYPING_SAVE_MS = 2000
 const DELETE_CONFIRM_MS = 3000
 const WIDE = '(min-width: 760px)'
+const RUN_IN_LIMIT = 12 // names listed under a section in the contents before "and N more"
 
 /**
  * Renders a Notebook note into `root`. `session` gives the model, the note's title, the
@@ -40,7 +40,6 @@ const WIDE = '(min-width: 760px)'
 export function mountNotebook(root, session) {
   const ui = {
     current: null, // id of the open section or entry, or null for the front page
-    editing: false, // the open entry's text is being edited
     query: '',
     highlight: '', // search term to mark in the entry opened from a result
     arranging: false, // the contents show drag handles and menus instead of reading view
@@ -58,6 +57,9 @@ export function mountNotebook(root, session) {
   const body = h('div', { class: 'notebook' })
   let saveTimer = 0
   let rendering = false
+  // The open entry's editor: { id, readOnly, host, editor }. It's kept across re-renders,
+  // so a re-render while you type (say, when a save comes back) doesn't interrupt you.
+  let live = null
   root.replaceChildren(body)
 
   function saveSoon() {
@@ -68,8 +70,9 @@ export function mountNotebook(root, session) {
     }, TYPING_SAVE_MS)
   }
 
-  /** Saves straight away if typing left a save waiting. */
+  /** Saves straight away if typing left a save waiting, including typing the editor hasn't reported yet. */
   function flush() {
+    live?.editor.flush()
     if (!saveTimer) return
     clearTimeout(saveTimer)
     saveTimer = 0
@@ -96,7 +99,6 @@ export function mountNotebook(root, session) {
   function open(id, { highlight = '' } = {}) {
     Object.assign(ui, {
       current: id,
-      editing: false,
       arranging: false,
       menu: null,
       moving: null,
@@ -106,21 +108,27 @@ export function mountNotebook(root, session) {
       highlight,
     })
     render()
-    const match = highlight && root.querySelector('.nb-page mark')
-    if (match) match.scrollIntoView({ block: 'center' })
-    else document.scrollingElement.scrollTop = 0
+    document.scrollingElement.scrollTop = 0
+    // The editor draws the search match once it's ready.
+    if (highlight) live?.editor.ready.then(() => root.querySelector('.nb-page mark')?.scrollIntoView({ block: 'center' }))
   }
 
   function render() {
-    if (!root.contains(body)) return // another note or template has replaced this view
+    if (!root.contains(body)) {
+      closeEditor()
+      return // another note or template has replaced this view
+    }
     const focus = captureFocus(root)
     const ctx = session.context()
     if (ui.current !== null && !find(ui.current)) ui.current = null
+    const showing = ui.query.trim() || ui.current === null ? null : find(ui.current)
+    if (live && showing?.entry?.id !== live.id) closeEditor()
+    const typing = live?.editor.hasFocus()
     const main = ui.query.trim() ? searchResults() : pagePane(ctx)
     rendering = true
     body.replaceChildren(topBar(), wide.matches ? h('div', { class: 'nb-columns' }, treePane(), main) : main)
     rendering = false
-    body.querySelectorAll('textarea').forEach(autosize)
+    if (typing) live.editor.focus()
     // data-disabled marks controls that are off for their own reasons; data-always ones stay on when locked.
     for (const control of body.querySelectorAll('input, textarea, button, select')) {
       if (!('always' in control.dataset)) control.disabled = session.readOnly || 'disabled' in control.dataset
@@ -146,27 +154,6 @@ export function mountNotebook(root, session) {
     }
     if (from < text.length) parts.push(text.slice(from))
     return parts
-  }
-
-  /** Builds DOM from renderMarkdown's tree. Text only ever goes in as text, never as HTML. */
-  function toDom(node, entryId) {
-    if (typeof node === 'string') return mark(node, ui.highlight)
-    const props = { ...node.props }
-    if (node.tag === 'input') {
-      props['aria-label'] = 'Checklist item'
-      if (props.disabled) props['data-disabled'] = true
-      if (props.dataset) {
-        const n = Number(props.dataset.check)
-        props.onchange = () => {
-          toggleCheck(session.model, entryId, n, session.context().today)
-          commit()
-        }
-      }
-    }
-    const children = (node.children ?? []).map((child) => toDom(child, entryId))
-    // The whole checklist line ticks the box, which is easier to hit on a phone.
-    if (node.tag === 'li' && props.class === 'md-check') return h('li', props, h('label', {}, children))
-    return h(node.tag, props, children)
   }
 
   function topBar() {
@@ -320,9 +307,8 @@ export function mountNotebook(root, session) {
       'section',
       { class: 'nb-page', 'aria-label': section?.title ?? rootTitle() },
       section && [
-        breadcrumb(pathTo(session.model, section.id).slice(0, -1)),
+        pageHead(pathTo(session.model, section.id).slice(0, -1), section, ctx),
         titleRow(section, ctx),
-        section.edited && h('p', { class: 'meta nb-edited' }, `Edited ${shortDate(section.edited, ctx.today)}`),
         ui.menu === section.id && itemMenu(section, false, ctx),
         ui.moving === section.id && movePicker(section, false, ctx),
       ],
@@ -331,45 +317,60 @@ export function mountNotebook(root, session) {
     )
   }
 
-  /** An entry: its name, then its text to read, tick and edit. */
+  /** An entry: its name, then its text in the editor, ready to read, tick and type into. */
   function entryPage({ entry, section }, ctx) {
     return h(
       'article',
       { class: 'nb-page', 'aria-label': entry.title },
-      breadcrumb(section ? pathTo(session.model, section.id) : []),
+      pageHead(section ? pathTo(session.model, section.id) : [], entry, ctx),
       titleRow(entry, ctx),
-      entry.edited && h('p', { class: 'meta nb-edited' }, `Edited ${shortDate(entry.edited, ctx.today)}`),
       ui.menu === entry.id && itemMenu(entry, true, ctx),
       ui.moving === entry.id && movePicker(entry, true, ctx),
-      ui.editing
-        ? editor(entry, ctx)
-        : h(
-            'div',
-            { class: 'nb-text' },
-            entry.text &&
-              h(
-                'div',
-                { class: 'md' },
-                renderMarkdown(entry.text).map((node) => toDom(node, entry.id)),
-              ),
-            h(
-              'button',
-              { type: 'button', class: 'text-button', onclick: () => startEditing(entry) },
-              entry.text ? 'Edit' : 'Add text',
-            ),
-          ),
+      editorFor(entry),
     )
   }
 
-  /** The way back up: the front page, then each section above. */
-  function breadcrumb(sections) {
+  /** The open entry's editor, made once and then moved into each re-render. */
+  function editorFor(entry) {
+    if (live && live.readOnly !== session.readOnly) closeEditor()
+    if (!live) {
+      const host = h('div', { class: 'nb-entry-editor' })
+      const editor = mountEntryEditor(host, {
+        markdown: entry.text,
+        editable: !session.readOnly,
+        highlight: ui.highlight,
+        onChange: (markdown) => {
+          setEntryText(session.model, entry.id, markdown, session.context().today)
+          saveSoon()
+        },
+      })
+      live = { id: entry.id, readOnly: session.readOnly, host, editor }
+    }
+    return live.host
+  }
+
+  /** Puts away the open entry's editor, keeping any typing it hasn't reported yet. */
+  function closeEditor() {
+    if (!live) return
+    live.editor.flush()
+    live.editor.destroy()
+    live = null
+  }
+
+  /** The way back up (the front page, then each section above), and when this was last edited. */
+  function pageHead(sections, item, ctx) {
     const crumb = (label, id) =>
       h('button', { type: 'button', class: 'crumb', 'data-always': '', onclick: () => open(id) }, label)
     return h(
-      'nav',
-      { class: 'nb-crumbs', 'aria-label': 'Where you are' },
-      crumb(rootTitle(), null),
-      sections.map((section) => [h('span', { class: 'crumb-sep', 'aria-hidden': 'true' }, '›'), crumb(section.title, section.id)]),
+      'div',
+      { class: 'nb-head' },
+      h(
+        'nav',
+        { class: 'nb-crumbs', 'aria-label': 'Where you are' },
+        crumb(rootTitle(), null),
+        sections.map((section) => [h('span', { class: 'crumb-sep', 'aria-hidden': 'true' }, '›'), crumb(section.title, section.id)]),
+      ),
+      item.edited && h('span', { class: 'meta nb-edited' }, `Edited ${shortDate(item.edited, ctx.today)}`),
     )
   }
 
@@ -478,8 +479,8 @@ export function mountNotebook(root, session) {
         : h(
             'ul',
             { class: 'toc' },
-            sections.map((section) => tocSection(section, 1, ctx)),
-            entries.map((entry) => tocEntry(entry, 1, ctx)),
+            sections.map((section) => tocSection(section, ctx)),
+            entries.map((entry) => tocEntry(entry, ctx)),
           ),
     )
   }
@@ -492,30 +493,41 @@ export function mountNotebook(root, session) {
       item.edited && h('span', { class: 'toc-meta' }, shortDate(item.edited, ctx.today)),
     )
 
-  function tocSection(section, level, ctx) {
-    const hasInside = section.children.length + section.entries.length > 0
-    const deeper = level === 2 ? countInside(section) : 0
+  /**
+   * A section: its name, then what's inside it run in on one line, as a book's analytical
+   * contents does. Sections inside are upright with how much they hold; entries are italic.
+   */
+  function tocSection(section, ctx) {
+    const inside = [
+      ...section.children.map((child) => ({ item: child, held: countInside(child), isSection: true })),
+      ...section.entries.map((entry) => ({ item: entry, held: 0, isSection: false })),
+    ]
+    const shown = inside.slice(0, RUN_IN_LIMIT)
+    const run = (label, id, isSection = false) =>
+      h('button', { type: 'button', class: `toc-run${isSection ? ' is-section' : ''}`, 'data-always': '', onclick: () => open(id) }, label)
     return h(
       'li',
-      { class: `toc-item level-${level} is-section`, 'data-item': section.id },
+      { class: 'toc-item is-section', 'data-item': section.id },
       tocLink(section, ctx),
-      level === 1 &&
-        hasInside &&
+      inside.length > 0 &&
         h(
-          'ul',
-          { class: 'toc' },
-          section.children.map((child) => tocSection(child, 2, ctx)),
-          section.entries.map((entry) => tocEntry(entry, 2, ctx)),
+          'p',
+          { class: 'toc-inside' },
+          shown.map(({ item, held, isSection }, index) => [
+            index > 0 && '; ',
+            run([item.title, held > 0 && h('span', { class: 'toc-held' }, ` (${held})`)], item.id, isSection),
+          ]),
+          inside.length > shown.length && ['; ', run(`and ${inside.length - shown.length} more`, section.id)],
         ),
-      deeper > 0 && h('p', { class: 'toc-more' }, `and ${deeper} more inside`),
     )
   }
 
-  function tocEntry(entry, level, ctx) {
-    const preview = level === 1 && plainPreview(entry.text)
+  /** An entry: its name, then the first line of its text. */
+  function tocEntry(entry, ctx) {
+    const preview = plainPreview(entry.text)
     return h(
       'li',
-      { class: `toc-item level-${level} is-entry`, 'data-item': entry.id },
+      { class: 'toc-item is-entry', 'data-item': entry.id },
       tocLink(entry, ctx),
       preview && h('p', { class: 'toc-preview' }, h('span', { class: 'toc-preview-text' }, preview)),
     )
@@ -685,82 +697,6 @@ export function mountNotebook(root, session) {
       // Chrome blurs a focused element when a re-render removes it; that isn't the user leaving.
       onblur: (event) => rendering || finish(event.target.value),
     })
-  }
-
-  function startEditing(entry) {
-    ui.editing = true
-    ui.focusTarget = `edit-${entry.id}`
-    render()
-  }
-
-  function editor(entry, ctx) {
-    const update = (value) => {
-      setEntryText(session.model, entry.id, value, ctx.today)
-      saveSoon()
-    }
-    const textarea = h('textarea', {
-      class: 'nb-editor',
-      rows: 6,
-      value: entry.text,
-      'aria-label': `Text of ${entry.title}`,
-      'data-focus': `edit-${entry.id}`,
-      oninput: (event) => {
-        autosize(event.target)
-        update(event.target.value)
-      },
-    })
-    const tool = (label, name, apply) =>
-      h(
-        'button',
-        {
-          type: 'button',
-          class: 'tool',
-          'aria-label': name,
-          title: name,
-          onpointerdown: (event) => event.preventDefault(), // keeps the selection in the text box
-          onclick: () => {
-            const next = apply({ value: textarea.value, start: textarea.selectionStart, end: textarea.selectionEnd })
-            textarea.value = next.value
-            textarea.focus()
-            textarea.setSelectionRange(next.start, next.end)
-            autosize(textarea)
-            update(next.value)
-          },
-        },
-        label,
-      )
-    return h(
-      'div',
-      { class: 'nb-editor-wrap' },
-      h(
-        'div',
-        { class: 'nb-toolbar', role: 'toolbar', 'aria-label': 'Formatting' },
-        tool('B', 'Bold', (state) => wrap(state, '**')),
-        tool('I', 'Italic', (state) => wrap(state, '_')),
-        tool('U', 'Underline', (state) => wrap(state, '<u>', '</u>')),
-        tool('•', 'Bulleted list', (state) => prefixLines(state, '- ')),
-        tool('1.', 'Numbered list', numberLines),
-        tool('☐', 'Checklist', (state) => prefixLines(state, '- [ ] ')),
-        tool('🔗', 'Link', insertLink),
-      ),
-      textarea,
-      h(
-        'div',
-        { class: 'button-row' },
-        h(
-          'button',
-          {
-            type: 'button',
-            class: 'button primary',
-            onclick: () => {
-              ui.editing = false
-              commit()
-            },
-          },
-          'Done',
-        ),
-      ),
-    )
   }
 
   function dragHandle(item, isEntry) {
