@@ -1404,7 +1404,7 @@ h1 {
   max-width: var(--measure);
   font-family: var(--serif);
   font-size: 1.1875rem;
-  line-height: 1.6;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
@@ -1416,26 +1416,22 @@ h1 {
   margin-bottom: 0;
 }
 
+/* Text keeps the spacing it was written or pasted with: nothing is added around paragraphs
+   or lists, so a blank line shows as one line, as it did where it came from. */
 .md p,
 .md ul,
-.md ol,
+.md ol {
+  margin: 0;
+}
+
 .md blockquote,
 .md pre {
-  margin: 0 0 0.8em;
+  margin: 0.4em 0;
 }
 
 .md ul,
 .md ol {
   padding-left: 1.25em;
-}
-
-.md li p {
-  margin: 0;
-}
-
-.md li ul,
-.md li ol {
-  margin: 0.2em 0;
 }
 
 /* A checklist item: its box where the bullet would be. */
